@@ -2,7 +2,7 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0">Clientes</h5>
     <a class="btn btn-primary" href="<?= url('cliente_ver.php') ?>">Nuevo Cliente</a>
-
+  </div>
 
   <form class="row g-2 mb-3" method="get" action="<?= url('clientes.php') ?>">
     <div class="col-md-10">
@@ -68,5 +68,5 @@
     </nav>
   </div>
 </div>
-  </div>
+
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>
