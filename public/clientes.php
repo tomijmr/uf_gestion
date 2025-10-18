@@ -7,6 +7,8 @@ require_once __DIR__ . '/../app/helpers.php';
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 
+include __DIR__ . '/../public/clientes_include.php';
+
 // Parámetros
 $q     = trim($_GET['q'] ?? '');
 $page  = max(1, (int)($_GET['page'] ?? 1));
@@ -47,6 +49,6 @@ function page_url(int $p, string $q): string {
   return url('clientes.php') . '?' . $qs;
 }
 
-include __DIR__ . '/../views/clientes_include.php';
+
 ?>
 
