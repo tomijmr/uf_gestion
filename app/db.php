@@ -4,17 +4,17 @@ function db(): PDO {
     static $pdo = null;
     if ($pdo) return $pdo;
 
-        $host = getenv('DB_HOST') ?: 'localhost';
-        $db   = getenv('DB_NAME') ?: 'a0011086_erp_mvp';
-        $user = getenv('DB_USER') ?: 'a0011086';
-        $pass = getenv('DB_PASS') ?: 'PObitovi56';
-        $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
+        // $host = getenv('DB_HOST') ?: 'localhost';
+        // $db   = getenv('DB_NAME') ?: 'a0011086_erp_mvp';
+        // $user = getenv('DB_USER') ?: 'a0011086';
+        // $pass = getenv('DB_PASS') ?: 'PObitovi56';
+        // $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
 
-    // $host = getenv('DB_HOST') ?: 'localhost';
-    // $db   = getenv('DB_NAME') ?: 'erp_mvp';
-    // $user = getenv('DB_USER') ?: 'root';
-    // $pass = getenv('DB_PASS') ?: '';
-    // $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
+    $host = getenv('DB_HOST') ?: 'localhost';
+    $db   = getenv('DB_NAME') ?: 'erp_mvp';
+    $user = getenv('DB_USER') ?: 'root';
+    $pass = getenv('DB_PASS') ?: '';
+    $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
 
     $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,

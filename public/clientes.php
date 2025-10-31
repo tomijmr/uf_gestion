@@ -7,41 +7,46 @@ require_once __DIR__ . '/../app/helpers.php';
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 
-// include __DIR__ . '/../public/clientes_include.php';
-
 // Parámetros
 $q     = trim($_GET['q'] ?? '');
 $page  = max(1, (int)($_GET['page'] ?? 1));
 $limit = 50;
 $off   = ($page - 1) * $limit;
 
-// WHERE y params
+// WHERE y parámetros
 $where  = '';
 $params = [];
+
 if ($q !== '') {
-  $where = " WHERE c.nombre LIKE ? OR c.cuit_dni LIKE ? OR c.telefono LIKE ? ";
+  $where = "WHERE c.nombre LIKE ? OR c.cuit_dni LIKE ? OR c.telefono LIKE ? OR c.gym LIKE ?";
   $like  = "%$q%";
-  $params = [$like, $like, $like];
+  $params = [$like, $like, $like, $like];
 }
 
-// Total para paginación
-$sqlCount = "SELECT COUNT(*) AS total
-             FROM customers c" . $where;
+// Total de registros
+$sqlCount = "SELECT COUNT(*) AS total FROM customers c $where";
 $stmt = db()->prepare($sqlCount);
 $stmt->execute($params);
 $total = (int)$stmt->fetch()['total'];
 $pages = max(1, (int)ceil($total / $limit));
 
-// Datos
-$sql = "SELECT c.id, c.nombre, c.cuit_dni, c.telefono, COALESCE(v.saldo,0) AS saldo
+// Consulta de datos
+$sql = "SELECT 
+          c.id, 
+          c.nombre, 
+          c.gym, 
+          c.cuit_dni, 
+          c.telefono, 
+          COALESCE(v.saldo, 0) AS saldo
         FROM customers c
         LEFT JOIN v_cc_cliente v ON v.customer_id = c.id
         $where
-        ORDER BY c.nombre
+        ORDER BY c.nombre ASC
         LIMIT $limit OFFSET $off";
+
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
-$rows = $stmt->fetchAll();
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Helper para links de paginación
 function page_url(int $p, string $q): string {
@@ -58,7 +63,7 @@ function page_url(int $p, string $q): string {
 
   <form class="row g-2 mb-3" method="get" action="<?= url('clientes.php') ?>">
     <div class="col-md-10">
-      <input class="form-control" name="q" value="<?= e($q) ?>" placeholder="Buscar por Nombre / CUIT-DNI / Teléfono">
+      <input class="form-control" name="q" value="<?= e($q) ?>" placeholder="Buscar por Nombre / CUIT-DNI / Teléfono / Gym">
     </div>
     <div class="col-md-2 d-grid">
       <button class="btn btn-outline-secondary">Buscar</button>
@@ -73,6 +78,7 @@ function page_url(int $p, string $q): string {
             <tr>
               <th style="width: 70px;">ID</th>
               <th>Nombre / Razón Social</th>
+              <th>Gym</th>
               <th>CUIT/DNI</th>
               <th>Teléfono</th>
               <th class="text-end">Saldo</th>
@@ -81,12 +87,13 @@ function page_url(int $p, string $q): string {
           </thead>
           <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="6" class="text-center text-muted py-4">No se encontraron clientes.</td></tr>
+            <tr><td colspan="7" class="text-center text-muted py-4">No se encontraron clientes.</td></tr>
           <?php else: ?>
             <?php foreach ($rows as $r): ?>
               <tr>
                 <td><?= (int)$r['id'] ?></td>
                 <td><?= e($r['nombre']) ?></td>
+                <td><?= e($r['gym']) ?></td>
                 <td><?= e($r['cuit_dni']) ?></td>
                 <td><?= e($r['telefono']) ?></td>
                 <td class="text-end"><?= money($r['saldo']) ?></td>

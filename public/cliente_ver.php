@@ -15,6 +15,7 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = [
         'nombre' => trim($_POST['nombre'] ?? ''),
+        'gym' => trim($_POST['gym'] ?? ''),
         'cuit_dni' => trim($_POST['cuit_dni'] ?? ''),
         'telefono' => trim($_POST['telefono'] ?? ''),
         'email' => trim($_POST['email'] ?? ''),
@@ -28,20 +29,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id > 0) {
             // actualizar
             $sql = "UPDATE customers 
-                    SET nombre=?, cuit_dni=?, telefono=?, email=?, direccion=?, 
+                    SET nombre=?, gym=?, cuit_dni=?, telefono=?, email=?, direccion=?, 
                         condicion_iva=?, limite_credito=?, notas=? 
                     WHERE id=?";
             db()->prepare($sql)->execute([
-                $data['nombre'], $data['cuit_dni'], $data['telefono'], $data['email'],
+                $data['nombre'], $data['gym'], $data['cuit_dni'], $data['telefono'], $data['email'],
                 $data['direccion'], $data['condicion_iva'], $data['limite_credito'], $data['notas'], $id
             ]);
         } else {
             // insertar
             $sql = "INSERT INTO customers 
-                    (nombre, cuit_dni, telefono, email, direccion, condicion_iva, limite_credito, notas) 
-                    VALUES (?,?,?,?,?,?,?,?)";
+                    (nombre, gym, cuit_dni, telefono, email, direccion, condicion_iva, limite_credito, notas) 
+                    VALUES (?,?,?,?,?,?,?,?,?)";
             db()->prepare($sql)->execute([
-                $data['nombre'], $data['cuit_dni'], $data['telefono'], $data['email'],
+                $data['nombre'], $data['gym'], $data['cuit_dni'], $data['telefono'], $data['email'],
                 $data['direccion'], $data['condicion_iva'], $data['limite_credito'], $data['notas']
             ]);
             $id = (int)db()->lastInsertId();
@@ -55,6 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // --- Obtener datos ---
 $row = [
     'nombre' => '',
+    'gym' => '',
     'cuit_dni' => '',
     'telefono' => '',
     'email' => '',
@@ -86,8 +88,13 @@ if ($id > 0) {
 
   <form method="post" class="row g-3">
     <div class="col-md-6">
-      <label class="form-label">Nombre/Razón Social *</label>
+      <label class="form-label">Nombre / Razón Social *</label>
       <input required name="nombre" class="form-control" value="<?= e($row['nombre']) ?>">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Gimnasio</label>
+      <input name="gym" class="form-control" placeholder="Nombre del gimnasio" value="<?= e($row['gym']) ?>">
     </div>
 
     <div class="col-md-3">
