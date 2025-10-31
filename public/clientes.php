@@ -39,10 +39,15 @@ $sql = "SELECT
           c.telefono, 
           COALESCE(v.saldo, 0) AS saldo
         FROM customers c
-        LEFT JOIN v_cc_cliente v ON v.customer_id = c.id
+        LEFT JOIN (
+          SELECT customer_id, SUM(debe - haber) AS saldo
+          FROM cc_movimientos
+          GROUP BY customer_id
+        ) v ON v.customer_id = c.id
         $where
         ORDER BY c.nombre ASC
         LIMIT $limit OFFSET $off";
+
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
