@@ -28,7 +28,7 @@ $MENU = [
 ?>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
   <div class="container-fluid">
-    <a class="navbar-brand fw-bold" href="<?= url('dashboard.php') ?>">UF - ERP</a>
+    <a class="navbar-brand fw-bold" href="<?= url('dashboard.php') ?>">Universal Fitness SA</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
       <span class="navbar-toggler-icon"></span>
     </button>

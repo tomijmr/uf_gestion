@@ -1,4 +1,7 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . '/../app/auth.php';
 require_login();
 require_once __DIR__ . '/../app/db.php';
@@ -36,17 +39,16 @@ $sql = "SELECT
           c.nombre, 
           c.gym, 
           c.cuit_dni, 
-          c.telefono, 
-          COALESCE(v.saldo, 0) AS saldo
+          c.telefono,
+          COALESCE(SUM(cl.monto), 0) - COALESCE(SUM(p.importe), 0) AS saldo
         FROM customers c
-        LEFT JOIN (
-          SELECT customer_id, SUM(debe - haber) AS saldo
-          FROM cc_movimientos
-          GROUP BY customer_id
-        ) v ON v.customer_id = c.id
+        LEFT JOIN customer_ledger cl ON cl.customer_id = c.id
+        LEFT JOIN payments p ON p.customer_id = c.id
         $where
+        GROUP BY c.id, c.nombre, c.gym, c.cuit_dni, c.telefono
         ORDER BY c.nombre ASC
         LIMIT $limit OFFSET $off";
+
 
 
 $stmt = db()->prepare($sql);
