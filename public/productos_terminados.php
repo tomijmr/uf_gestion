@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
       $codigo = trim($_POST['codigo'] ?? '');
       $nombre = trim($_POST['nombre'] ?? '');
-      $tipo   = $_POST['tipo'] ?? 'MP';
+      $tipo   = $_POST['tipo'] ?? 'PT'; // DEFAULT A PT
       $unidad = trim($_POST['unidad'] ?? 'UN');
       $valor_ingresado = (float)($_POST['precio_std'] ?? 0); 
       $stock_minimo = isset($_POST['stock_minimo']) ? (float)$_POST['stock_minimo'] : 0;
@@ -88,10 +88,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       
       if ($tipo === 'MP') {
           $costo_std = $valor_ingresado;
-          $precio_std = 0.0; // Precio de venta de MP se edita en la ficha
+          $precio_std = 0.0;
       } else {
           $precio_std = $valor_ingresado;
-          $costo_std = 0.0;
+          $costo_std = 0.0; // El costo de PT se calcula via BOM
       }
 
       $sql = "INSERT INTO products (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo)
@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       
       $last_id = (int)db()->lastInsertId();
       if ($tipo === 'PT') {
-          // Si creamos un PT, refrescamos su precio inicial (aunque sea 0 sin BOM)
+          // Si creamos un PT, refrescamos su precio inicial
           refresh_pt_price($last_id);
       }
 
@@ -116,10 +116,10 @@ $q    = trim($_GET['q'] ?? '');
 // Valor de 'tipo' que viene del usuario (puede ser '', 'MP', 'PT')
 $selected_tipo_ui = trim($_GET['tipo'] ?? ''); 
 
-// Lógica de filtrado: forzar MP si es la primera carga o no hay filtro/búsqueda
+// Lógica de filtrado: forzar PT si es la primera carga o no hay filtro/búsqueda
 $filter_tipo = $selected_tipo_ui; 
 if ($selected_tipo_ui === '' && $q === '') {
-    $filter_tipo = 'MP'; // Forzar filtro a MP en la carga inicial
+    $filter_tipo = 'PT'; // FORZAR filtro a PT en la carga inicial
 }
 
 
@@ -131,7 +131,7 @@ if ($q !== '') {
   $params[] = "%$q%";
 }
 
-// Si $filter_tipo está seteado (o fue forzado a 'MP'), aplicamos el filtro.
+// Si $filter_tipo está seteado (o fue forzado a 'PT'), aplicamos el filtro.
 // Si $filter_tipo es '' (es decir, el usuario seleccionó "MP y PT"), no se añade WHERE.
 if ($filter_tipo !== '' && in_array($filter_tipo, ['MP','PT'], true)) {
   $where[] = "p.tipo = ?";
@@ -153,6 +153,7 @@ $pages = max(1, (int)ceil($total / $limit));
 
 /**
  * Traemos productos + costo_bom (para PT), margen_pct y disponibles/min.
+ * Se incluye el join a product_bom ya que esta vista es ahora para PT.
  */
 $sql = "
   SELECT
@@ -190,7 +191,7 @@ function badge_margen(?float $m): string {
 ?>
 <div class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="mb-0">Listado de Materia Prima (MP)</h5>
+    <h5 class="mb-0">Listado de Productos Terminados (PT)</h5>
     <a class="btn btn-primary" href="<?= url('producto_ver.php') ?>">Nuevo Producto</a>
   </div>
 
@@ -205,8 +206,8 @@ function badge_margen(?float $m): string {
       <!-- Usamos $selected_tipo_ui para reflejar la selección real del usuario -->
       <select name="tipo" class="form-select">
         <option value="" <?= $selected_tipo_ui===''?'selected':'' ?>>MP y PT</option>
-        <option value="MP" <?= $selected_tipo_ui==='MP'||($selected_tipo_ui==='' && $q==='')?'selected':'' ?>>Materia Prima</option>
-        <option value="PT" <?= $selected_tipo_ui==='PT'?'selected':'' ?>>Producto Terminado</option>
+        <option value="MP" <?= $selected_tipo_ui==='MP'?'selected':'' ?>>Materia Prima</option>
+        <option value="PT" <?= $selected_tipo_ui==='PT'||($selected_tipo_ui==='' && $q==='')?'selected':'' ?>>Producto Terminado</option>
       </select>
     </div>
     <div class="col-md-2 d-grid">
@@ -230,15 +231,15 @@ function badge_margen(?float $m): string {
         </div>
         <div class="col-md-2">
           <select name="tipo" class="form-select">
+            <option value="PT">PT</option> <!-- Default a PT -->
             <option value="MP">MP</option>
-            <option value="PT">PT</option>
           </select>
         </div>
         <div class="col-md-1">
           <input class="form-control" name="unidad" value="UN">
         </div>
         <div class="col-md-1">
-          <input class="form-control" type="number" step="0.01" name="precio_std" placeholder="$ Valor (Costo/Venta)">
+          <input class="form-control" type="number" step="0.01" name="precio_std" placeholder="$ Valor (Venta)">
         </div>
         <div class="col-md-2">
           <input class="form-control" type="number" step="0.001" name="stock_minimo" placeholder="Stock mín.">
@@ -264,11 +265,9 @@ function badge_margen(?float $m): string {
               <th class="text-end" title="Precio de venta estándar">Precio Venta</th>
               <th class="text-end" title="Costo Estándar (última compra MP)">Costo Est.</th>
               
-              <!-- Columnas ocultas/simplificadas para vista de MP -->
-              <?php if ($filter_tipo !== 'MP'): ?>
-                <th class="text-end" title="Costo BOM (solo PT)">Costo BOM</th>
-                <th class="text-center" title="Margen efectivo desde BOM">Margen</th>
-              <?php endif; ?>
+              <!-- Columnas visibles para PT -->
+              <th class="text-end" title="Costo BOM (solo PT)">Costo BOM</th>
+              <th class="text-center" title="Margen efectivo desde BOM">Margen</th>
               
               <th class="text-end">Stock</th>
               <th class="text-end">Reservado</th>
@@ -280,7 +279,7 @@ function badge_margen(?float $m): string {
           </thead>
           <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="<?= $filter_tipo === 'MP' ? 12 : 14 ?>" class="text-center text-muted py-4">No hay productos.</td></tr>
+            <tr><td colspan="15" class="text-center text-muted py-4">No hay productos.</td></tr>
           <?php else: foreach ($rows as $r):
             $isPT = ($r['tipo'] === 'PT');
             $costoStd = (float)$r['costo_std'];
@@ -307,21 +306,19 @@ function badge_margen(?float $m): string {
               <td class="text-end"><?= money($precio) ?></td>
               <td class="text-end fw-bold"><?= money($costoStd) ?></td>
               
-              <!-- Columnas ocultas/simplificadas para vista de MP -->
-              <?php if ($filter_tipo !== 'MP'): ?>
-                <td class="text-end"><?= $isPT ? money($costoBOM) : '—' ?></td>
-                <td class="text-center">
-                  <?php
-                    if (!$isPT) {
-                      echo '<span class="badge bg-secondary">—</span>';
-                    } else {
-                      if ($margenEf === null) echo '<span class="badge bg-secondary">—</span>';
-                      elseif ($margenEf >= 9999) echo '<span class="badge bg-success">∞</span>';
-                      else echo badge_margen($margenEf);
-                    }
-                  ?>
-                </td>
-              <?php endif; ?>
+              <!-- Columnas para PT -->
+              <td class="text-end"><?= $isPT ? money($costoBOM) : '—' ?></td>
+              <td class="text-center">
+                <?php
+                  if (!$isPT) {
+                    echo '<span class="badge bg-secondary">—</span>';
+                  } else {
+                    if ($margenEf === null) echo '<span class="badge bg-secondary">—</span>';
+                    elseif ($margenEf >= 9999) echo '<span class="badge bg-success">∞</span>';
+                    else echo badge_margen($margenEf);
+                  }
+                ?>
+              </td>
               
               <td class="text-end"><?= (float)$r['stock_actual'] ?></td>
               <td class="text-end"><?= (float)$r['stock_reservado'] ?></td>

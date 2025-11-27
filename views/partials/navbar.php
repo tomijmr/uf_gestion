@@ -15,15 +15,19 @@ function can(...$roles): bool {
 
 /** Definición de menú por roles (fácil de ajustar) */
 $MENU = [
-  ['label' => 'Dashboard',  'href' => url('dashboard.php'),  'roles' => ['*']], // * = todos logueados
-  ['label' => 'Clientes',   'href' => url('clientes.php'),   'roles' => ['ADMIN','VENTAS','LECTURA']],
-  ['label' => 'Pedidos',    'href' => url('pedidos.php'),    'roles' => ['ADMIN','VENTAS']],
-  ['label' => 'Productos',  'href' => url('productos.php'),  'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA']],
-  ['label' => 'Stock',      'href' => url('stock.php'),      'roles' => ['ADMIN','DEPOSITO']],
-  ['label' => 'Producción', 'href' => url('op.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO']],
-  ['label' => 'Compras',       'href' => url('compras.php'),       'roles' => ['ADMIN','CAJA']],
-  ['label' => 'Caja',       'href' => url('caja.php'),       'roles' => ['ADMIN','CAJA']],
+  ['label' => 'Dashboard',           'href' => url('dashboard.php'),            'roles' => ['*']], // * = todos logueados
+  ['label' => 'Clientes',            'href' => url('clientes.php'),             'roles' => ['ADMIN','VENTAS','LECTURA']],
+  ['label' => 'Pedidos',             'href' => url('pedidos.php'),              'roles' => ['ADMIN','VENTAS']],
+  // Menú de Inventario dividido:
+  ['label' => 'Materias Primas',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA']],
+  ['label' => 'Maquinas', 'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA']],
+  ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO']],
+  ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO']],
+  ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA']],
+  ['label' => 'Caja',                'href' => url('caja.php'),                 'roles' => ['ADMIN','CAJA']],
 ];
+
+// Note: Se ha cambiado el nombre del item de menú de 'Productos' a 'Materias Primas' y se agregó 'Productos Terminados'.
 
 ?>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
@@ -54,7 +58,7 @@ $MENU = [
               <li><a class="dropdown-item" href="<?= url('usuarios.php') ?>">Usuarios</a></li>
               <li><a class="dropdown-item" href="<?= url('roles.php') ?>">Roles</a></li>
               <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="<?= url('auditoria.php') ?>">Auditoría</a></li>
+              <!-- <li><a class="dropdown-item" href="<?= url('auditoria.php') ?>">Auditoría</a></li> -->
             </ul>
           </li>
         <?php endif; ?>

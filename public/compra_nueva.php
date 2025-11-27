@@ -98,7 +98,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $nombre = trim($nombres[$i] ?? '');
       $unidad = trim($unidades[$i] ?? 'UN');
       $cant   = (float)($cantidades[$i] ?? 0);
-      $costoU = (float)($costos[$i] ?? 0);
+      
+      // CORRECCIÓN DEL PARSEO: Reemplazar coma por punto para que PHP lo interprete como float.
+      $costo_raw = trim($costos[$i] ?? '0');
+      $costoU = (float) str_replace(',', '.', $costo_raw); 
+      
       $notaI  = trim($notas_i[$i] ?? '');
       $pidRaw = $product_ids[$i] ?? '';
 
@@ -137,8 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insProd->execute([$codigo, $nombre, 'MP', ($unidad?:'UN'), $costoU]);
         $product_id = (int)db()->lastInsertId();
       } else {
-        // Si existe, actualizar costo_std y unidad (último costo & unidad preferida)
-        $updCosto->execute([$costoU, $unidad ?: $prod['unidad'], $product_id]);
+        // CORRECCIÓN ANTERIOR: Si existe, actualizar costo_std y unidad (último costo & unidad preferida)
+        // Se usa 'UN' como fallback si la unidad del formulario y la de la DB están vacías.
+        $updCosto->execute([$costoU, $unidad ?: $prod['unidad'] ?: 'UN', $product_id]);
       }
 
       // Stock +
@@ -206,10 +211,6 @@ include __DIR__ . '/../views/partials/navbar.php';
           <label class="form-label">Número *</label>
           <input class="form-control" name="comp_numero" required placeholder="0001-00000001">
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Comprobante (PDF/JPG/PNG)</label>
-          <input class="form-control" type="file" name="archivo" accept=".pdf,.jpg,.jpeg,.png">
-        </div>
         <div class="col-md-8">
           <label class="form-label">Notas</label>
           <input class="form-control" name="notas">
@@ -251,7 +252,6 @@ include __DIR__ . '/../views/partials/navbar.php';
   </form>
 </div>
 
-<!-- Modal Picker de Productos -->
 <div class="modal fade" id="productPickerModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -275,7 +275,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <th style="width:90px;"></th>
               </tr>
             </thead>
-            <tbody><!-- rows por JS --></tbody>
+            <tbody></tbody>
           </table>
         </div>
       </div>

@@ -10,8 +10,11 @@ $flash_err = '';
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 /* ---------- Utilidades BOM / precio ---------- */
+/**
+ * Cambio 1: bom_cost ahora usa p.costo_std para calcular el costo total del BOM.
+ */
 function bom_cost(int $pt_id): float {
-  $sql = "SELECT SUM(b.cant_por_unidad * p.precio_std) AS costo
+  $sql = "SELECT SUM(b.cant_por_unidad * p.costo_std) AS costo
           FROM product_bom b
           JOIN products p ON p.id = b.component_id
           WHERE b.product_pt_id = ?";
@@ -41,34 +44,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $nombre = trim($_POST['nombre'] ?? '');
       $tipo   = $_POST['tipo'] ?? 'MP';
       $unidad = trim($_POST['unidad'] ?? 'UN');
-      $precio = (float)($_POST['precio_std'] ?? 0);
+      $precio = (float)($_POST['precio_std'] ?? 0); // Precio de Venta (PT) o Valor Venta/Costo (MP)
       $activo = isset($_POST['activo']) ? 1 : 0;
       $margen = isset($_POST['margen_pct']) ? (float)$_POST['margen_pct'] : 30.0;
       $stock_minimo = isset($_POST['stock_minimo']) ? (float)$_POST['stock_minimo'] : 0;
+      
+      // Capturamos el costo_std que viene del formulario si es MP.
+      $costo_std = (float)($_POST['costo_std'] ?? 0); 
 
       if ($codigo === '' || $nombre === '') throw new Exception('Código y Nombre son obligatorios.');
       if (!in_array($tipo, ['MP','PT'], true)) throw new Exception('Tipo inválido.');
 
       if ($id > 0) {
-        $sql = "UPDATE products
-                   SET codigo=?, nombre=?, tipo=?, unidad=?, precio_std=?, activo=?, margen_pct=?, stock_minimo=?
-                 WHERE id=?";
-        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $precio, $activo, $margen, $stock_minimo, $id]);
+        // --- INICIO CORRECCIÓN para guardar MP COSTO_STD ---
+        $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?";
+        $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo];
+
+        if ($tipo === 'MP') {
+            // Si es MP, actualizamos el precio_std y el costo_std.
+            $setFields .= ", precio_std=?, costo_std=?";
+            // Insertar $precio y $costo_std antes de $activo
+            array_splice($params, 4, 0, [$precio, $costo_std]); 
+        } else {
+            // Si es PT, solo actualizamos precio_std (que se recalcula)
+            $setFields .= ", precio_std=?";
+            array_splice($params, 4, 0, [$precio]);
+        }
+        
+        $sql = "UPDATE products SET $setFields WHERE id=?";
+        $params[] = $id;
+
+        db()->prepare($sql)->execute($params);
+        // --- FIN CORRECCIÓN ---
 
         if ($tipo === 'PT') {
-          refresh_pt_price($id); // sobre-escribe precio manual con BOM+margen
+          // Si el producto que editamos es PT, refrescamos su precio de venta
+          refresh_pt_price($id); 
         }
       } else {
+        // Lógica de inserción (Alta de Producto Nuevo)
+        $costo_std_insert = ($tipo === 'MP') ? $costo_std : 0; // Usar costo_std enviado si es MP
+        $precio_std_insert = ($tipo === 'MP') ? $precio : $precio;
+        
         $sql = "INSERT INTO products
-                   (codigo, nombre, tipo, unidad, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo)
-                VALUES (?,?,?,?,?,0,0,?,?,?)";
-        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $precio, $activo, $margen, $stock_minimo]);
+                   (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo)
+                VALUES (?,?,?,?,?,?,0,0,?,?,?)";
+        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo]);
         $id = (int)db()->lastInsertId();
 
         if ($tipo === 'PT') {
           refresh_pt_price($id);
         }
       }
+      
+      // Si actualizamos una MP, necesitamos refrescar los precios de TODOS los PT que la usan.
+      if ($tipo === 'MP') {
+        // En lugar de actualizar todos los PT (como en productos.php), solo actualizamos los dependientes.
+        $dependent_pt_ids = db()->query("SELECT product_pt_id FROM product_bom WHERE component_id = $id")->fetchAll(PDO::FETCHCOLUMN);
+        foreach ($dependent_pt_ids as $pt_id) {
+            refresh_pt_price((int)$pt_id);
+        }
+      }
+      
       $flash_ok = 'Producto guardado correctamente.';
     } catch (Throwable $e) {
       $flash_err = 'No se pudo guardar: ' . $e->getMessage();
@@ -77,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // BOM: agregar componente
   if ($action === 'bom_add') {
+    // ... (El código de bom_add sigue siendo el mismo y llama a refresh_pt_price($id))
     try {
       if ($id <= 0) throw new Exception('Primero guardá el producto.');
       $component_id = (int)($_POST['component_id'] ?? 0);
@@ -112,6 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // BOM: eliminar componente (mismo form)
   if ($action === 'bom_update' && isset($_POST['bom_remove_id'])) {
+    // ... (El código de bom_remove sigue siendo el mismo y llama a refresh_pt_price($id))
     try {
       if ($id <= 0) throw new Exception('Producto inválido.');
       $component_id = (int)$_POST['bom_remove_id'];
@@ -126,6 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // BOM: guardar cantidades
   if ($action === 'bom_update' && !isset($_POST['bom_remove_id'])) {
+    // ... (El código de bom_update sigue siendo el mismo y llama a refresh_pt_price($id))
     try {
       if ($id <= 0) throw new Exception('Producto inválido.');
       $cants = $_POST['cant'] ?? [];
@@ -145,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // Margen: actualizar
   if ($action === 'set_margin') {
+    // ... (El código de set_margin sigue siendo el mismo y llama a refresh_pt_price($id))
     try {
       if ($id <= 0) throw new Exception('Producto inválido.');
       $m = max(0, (float)($_POST['margen_pct'] ?? 0));
@@ -165,6 +206,7 @@ $row = [
   'tipo' => 'MP',
   'unidad' => 'UN',
   'precio_std' => 0,
+  'costo_std' => 0, // Aseguramos que existe la clave
   'activo' => 1,
   'stock_actual' => 0,
   'stock_reservado' => 0,
@@ -184,7 +226,8 @@ $costo_bom = 0.0;
 $precio_calc = null;
 
 if ($id > 0 && $row['tipo'] === 'PT') {
-  $sb = db()->prepare("SELECT b.component_id, p.codigo, p.nombre, p.unidad, b.cant_por_unidad, p.precio_std
+  // Aquí es donde obtienes el costo_std de la MP, por lo que siempre será el valor actual en la BD.
+  $sb = db()->prepare("SELECT b.component_id, p.codigo, p.nombre, p.unidad, b.cant_por_unidad, p.costo_std 
                        FROM product_bom b
                        JOIN products p ON p.id=b.component_id
                        WHERE b.product_pt_id=?
@@ -195,7 +238,8 @@ if ($id > 0 && $row['tipo'] === 'PT') {
   $componentesSel = db()->query("SELECT id, codigo, nombre FROM products WHERE tipo='MP' AND activo=1 ORDER BY nombre LIMIT 500")->fetchAll();
 
   foreach ($bom as $b) {
-    $costo_bom += (float)$b['cant_por_unidad'] * (float)$b['precio_std'];
+    // Usar costo_std para la suma del costo BOM
+    $costo_bom += (float)$b['cant_por_unidad'] * (float)$b['costo_std']; 
   }
   $precio_calc = round($costo_bom * (1 + ((float)$row['margen_pct']/100)), 2);
 }
@@ -236,12 +280,19 @@ include __DIR__ . '/../views/partials/navbar.php';
           <input name="unidad" class="form-control" value="<?= e($row['unidad']) ?>">
         </div>
 
-        <!-- Precio: si es PT, se sobrescribe desde BOM+margen -->
         <div class="col-md-2">
-          <label class="form-label">Precio std.</label>
+          <label class="form-label">Precio std. (Venta)</label>
           <input name="precio_std" type="number" step="0.01" class="form-control" value="<?= (float)$row['precio_std'] ?>">
-          <div class="form-text"><?= $row['tipo']==='PT' ? 'Se recalcula desde BOM + margen.' : 'Editable manual (MP).' ?></div>
+          <div class="form-text"><?= $row['tipo']==='PT' ? 'Se recalcula desde BOM + margen.' : 'Precio de venta (MP).' ?></div>
         </div>
+        
+        <?php if ($row['tipo'] === 'MP'): ?>
+        <div class="col-md-2">
+          <label class="form-label">Costo std. (MP)</label>
+          <input name="costo_std" type="number" step="0.01" class="form-control" value="<?= (float)$row['costo_std'] ?>">
+          <div class="form-text">Costo de última compra (MP).</div>
+        </div>
+        <?php endif; ?>
 
         <div class="col-md-2">
           <label class="form-label">Stock mínimo</label>
@@ -281,7 +332,6 @@ include __DIR__ . '/../views/partials/navbar.php';
   </div>
 
   <?php if ($id > 0 && $row['tipo'] === 'PT'): ?>
-  <!-- Panel costo + margen + precio -->
   <div class="card shadow-sm mb-4">
     <div class="card-body">
       <div class="row g-3 align-items-end">
@@ -321,7 +371,6 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div class="card-body">
       <h6 class="mb-3">BOM — Componentes por unidad de: <strong><?= e($row['codigo']) ?></strong> <?= e($row['nombre']) ?></h6>
 
-      <!-- Agregar componente -->
       <form class="row g-2 mb-3" method="post">
         <input type="hidden" name="action" value="bom_add">
         <div class="col-md-6">
@@ -340,7 +389,6 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
       </form>
 
-      <!-- BOM: un solo formulario para guardar/eliminar -->
       <form method="post">
         <input type="hidden" name="action" value="bom_update">
         <div class="table-responsive">
@@ -350,8 +398,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <th>Código</th>
                 <th>Nombre</th>
                 <th>Unidad</th>
-                <th class="text-end" style="width:180px;">$ MP</th>
-                <th class="text-end" style="width:220px;">Cant. por unidad</th>
+                <th class="text-end" style="width:180px;">$ Costo Est.</th> <th class="text-end" style="width:220px;">Cant. por unidad</th>
                 <th class="text-end" style="width:140px;">Acciones</th>
               </tr>
             </thead>
@@ -363,8 +410,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <td><?= e($b['codigo']) ?></td>
                   <td><?= e($b['nombre']) ?></td>
                   <td><?= e($b['unidad']) ?></td>
-                  <td class="text-end"><?= money($b['precio_std']) ?></td>
-                  <td class="text-end">
+                  <td class="text-end"><?= money($b['costo_std']) ?></td> <td class="text-end">
                     <input class="form-control form-control-sm text-end" type="number" step="0.0001" min="0.0001" name="cant[<?= $cid ?>]" value="<?= (float)$b['cant_por_unidad'] ?>">
                   </td>
                   <td class="text-end">
