@@ -58,7 +58,7 @@ $MENU = [
               <li><a class="dropdown-item" href="<?= url('usuarios.php') ?>">Usuarios</a></li>
               <li><a class="dropdown-item" href="<?= url('roles.php') ?>">Roles</a></li>
               <li><hr class="dropdown-divider"></li>
-              <!-- <li><a class="dropdown-item" href="<?= url('auditoria.php') ?>">Auditoría</a></li> -->
+              <li><a class="dropdown-item" href="<?= url('auditoria.php') ?>">Auditoría</a></li>
             </ul>
           </li>
         <?php endif; ?>

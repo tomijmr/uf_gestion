@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       // Validar reservas suficientes
       foreach ($items as $it) {
-        if ($it['tipo'] !== 'PT') continue; // sólo PT generan entrega de stock
+        if ($it['tipo'] !== 'PT') continue;
         $reservado = (float)$it['stock_reservado'];
         if ($reservado < (float)$it['cant']) {
           throw new Exception("Reserva insuficiente para product_id {$it['product_id']}");
@@ -51,7 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       foreach ($items as $it) {
         if ($it['tipo'] !== 'PT') continue;
         $cant = (float)$it['cant'];
-        // salida de stock y baja de reserva (mismo valor)
         $updProd->execute([$cant, $cant, (int)$it['product_id']]);
         $insMove->execute([(int)$it['product_id'], $cant, $order_id]);
       }
@@ -80,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $estados = ['BORRADOR','CONFIRMADO','EN_PRODUCCION','LISTO_ENTREGA','ENTREGADO','CERRADO'];
 $fe_desde = trim($_GET['desde'] ?? '');
 $fe_hasta = trim($_GET['hasta'] ?? '');
-$q        = trim($_GET['q'] ?? ''); // cliente/ID
+$q        = trim($_GET['q'] ?? '');
 $estado   = trim($_GET['estado'] ?? '');
 
 $page  = max(1, (int)($_GET['page'] ?? 1));
@@ -90,12 +89,12 @@ $off   = ($page - 1) * $limit;
 // Build WHERE
 $where = [];
 $params = [];
+
 if ($estado !== '' && in_array($estado, $estados, true)) {
   $where[] = "o.estado = ?";
   $params[] = $estado;
 }
 if ($q !== '') {
-  // match por ID exacto o por nombre cliente LIKE
   if (ctype_digit($q)) {
     $where[] = "(o.id = ? OR c.nombre LIKE ?)";
     $params[] = (int)$q;
@@ -113,6 +112,7 @@ if ($fe_hasta !== '') {
   $where[] = "DATE(o.fecha) <= ?";
   $params[] = $fe_hasta;
 }
+
 $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
 // Totales
@@ -126,7 +126,7 @@ $total = (int)$st->fetch()['total'];
 $pages = max(1, (int)ceil($total / $limit));
 
 // Datos
-$sql = "SELECT o.id, o.fecha, o.estado, o.total_neto, o.saldo, c.nombre AS cliente
+$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, c.nombre AS cliente
         FROM orders o
         JOIN customers c ON c.id=o.customer_id
         $whereSql
@@ -136,7 +136,7 @@ $st = db()->prepare($sql);
 $st->execute($params);
 $rows = $st->fetchAll();
 
-// Items por pedido (para vista rápida)
+// Items por pedido
 function getItems(int $order_id): array {
   $s = db()->prepare("SELECT oi.product_id, p.codigo, p.nombre, p.tipo, oi.cant, oi.precio_unit, oi.subtotal
                       FROM order_items oi
@@ -160,7 +160,6 @@ function badge_estado(string $estado): string {
   return '<span class="badge bg-' . $cls . '">' . e($estado) . '</span>';
 }
 
-// Links paginación
 function page_url(int $p): string {
   $qs = $_GET;
   $qs['page'] = $p;
@@ -214,6 +213,7 @@ include __DIR__ . '/../views/partials/navbar.php';
             <tr>
               <th style="width:90px;">#</th>
               <th>Fecha</th>
+              <th>Entrega</th>
               <th>Cliente</th>
               <th class="text-end">Total</th>
               <th class="text-end">Saldo</th>
@@ -223,13 +223,14 @@ include __DIR__ . '/../views/partials/navbar.php';
           </thead>
           <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="7" class="text-center text-muted py-4">No hay pedidos.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted py-4">No hay pedidos.</td></tr>
           <?php else: ?>
             <?php foreach ($rows as $r): ?>
               <?php $items = getItems((int)$r['id']); ?>
               <tr>
                 <td>#<?= (int)$r['id'] ?></td>
                 <td><?= e($r['fecha']) ?></td>
+                <td><?= $r['fecha_entrega'] ? e($r['fecha_entrega']) : '-' ?></td>
                 <td><?= e($r['cliente']) ?></td>
                 <td class="text-end"><?= money($r['total_neto']) ?></td>
                 <td class="text-end"><?= money($r['saldo']) ?></td>
@@ -245,13 +246,23 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <?php endif; ?>
                 </td>
               </tr>
+
               <tr class="collapse" id="it<?= (int)$r['id'] ?>">
-                <td colspan="7" class="bg-light">
+                <td colspan="8" class="bg-light">
                   <div class="p-3">
                     <div class="fw-semibold mb-2">Ítems del pedido #<?= (int)$r['id'] ?></div>
                     <div class="table-responsive">
                       <table class="table table-sm mb-0">
-                        <thead><tr><th>Código</th><th>Nombre</th><th class="text-center">Tipo</th><th class="text-end">Precio</th><th class="text-end">Cant</th><th class="text-end">Subtotal</th></tr></thead>
+                        <thead>
+                          <tr>
+                            <th>Código</th>
+                            <th>Nombre</th>
+                            <th class="text-center">Tipo</th>
+                            <th class="text-end">Precio</th>
+                            <th class="text-end">Cant</th>
+                            <th class="text-end">Subtotal</th>
+                          </tr>
+                        </thead>
                         <tbody>
                           <?php foreach ($items as $it): ?>
                             <tr>
@@ -269,6 +280,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                   </div>
                 </td>
               </tr>
+
             <?php endforeach; ?>
           <?php endif; ?>
           </tbody>
@@ -277,7 +289,6 @@ include __DIR__ . '/../views/partials/navbar.php';
     </div>
   </div>
 
-  <!-- Paginación -->
   <div class="d-flex justify-content-between align-items-center mt-3">
     <div class="small text-muted">
       Mostrando <?= $rows ? ($off + 1) : 0 ?>–<?= $off + count($rows) ?> de <?= $total ?>

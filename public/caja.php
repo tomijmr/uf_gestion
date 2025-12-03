@@ -8,69 +8,116 @@ $flash_ok = '';
 $flash_err = '';
 
 $MEDIOS = ['EFECTIVO','DEBITO','TRANSFER','CREDITO','NC'];
+$GASTO_CATEGORIAS = ['SERVICIOS','SUELDOS','ALQUILER','IMPUESTOS','INSUMOS','OTROS'];
 
 // --------------------
 // Tab activo por GET
 // --------------------
-$validTabs = ['cobrar','recientes','cc','resumen'];
+$validTabs = ['cobrar','recientes','cc','resumen','gastos'];
 $tab = $_GET['tab'] ?? 'cobrar';
 if (!in_array($tab, $validTabs, true)) $tab = 'cobrar';
 
 // -------------------------------
 // POST: Registrar pago (cobranza)
 // -------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'registrar_pago') {
-  $customer_id = (int)($_POST['customer_id'] ?? 0);
-  $order_id    = (int)($_POST['order_id'] ?? 0);
-  $medio       = $_POST['medio'] ?? 'EFECTIVO';
-  $importe     = max(0, (float)($_POST['importe'] ?? 0));
-  $referencia  = trim($_POST['referencia'] ?? '');
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $action = $_POST['action'] ?? '';
 
-  try {
-    if ($customer_id <= 0) throw new Exception('Debe seleccionar un cliente.');
-    if (!in_array($medio, $MEDIOS, true)) throw new Exception('Medio de pago inválido.');
-    if ($importe <= 0) throw new Exception('Importe inválido.');
+  // --- COBRO ---
+  if ($action === 'registrar_pago') {
+    $customer_id = (int)($_POST['customer_id'] ?? 0);
+    $order_id    = (int)($_POST['order_id'] ?? 0);
+    $medio       = $_POST['medio'] ?? 'EFECTIVO';
+    $importe     = max(0, (float)($_POST['importe'] ?? 0));
+    $referencia  = trim($_POST['referencia'] ?? '');
 
-    db()->beginTransaction();
+    try {
+      if ($customer_id <= 0) throw new Exception('Debe seleccionar un cliente.');
+      if (!in_array($medio, $MEDIOS, true)) throw new Exception('Medio de pago inválido.');
+      if ($importe <= 0) throw new Exception('Importe inválido.');
 
-    if ($order_id > 0) {
-      $so = db()->prepare("SELECT id, estado, saldo FROM orders WHERE id=? AND customer_id=? FOR UPDATE");
-      $so->execute([$order_id, $customer_id]);
-      $o = $so->fetch();
-      if (!$o) throw new Exception('El pedido no existe o no pertenece al cliente.');
-    }
+      db()->beginTransaction();
 
-    $sp = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia)
-                         VALUES (?, ?, NOW(), ?, ?, ?)");
-    $sp->execute([$customer_id, $order_id ?: null, $medio, $importe, $referencia]);
-
-    // Ledger ABONO
-    $ss = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
-                         FROM customer_ledger WHERE customer_id=?");
-    $ss->execute([$customer_id]);
-    $saldoAnterior = (float)($ss->fetch()['saldo'] ?? 0);
-
-    $saldoResultante = $saldoAnterior - $importe;
-    $sl = db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
-                         VALUES (?, NOW(), 'ABONO', 'PAGO', ?, ?, ?, ?)");
-    $sl->execute([$customer_id, $order_id ?: null, 'Pago registrado en caja', $importe, $saldoResultante]);
-
-    if ($order_id > 0) {
-      $newSaldo = max(0, (float)$o['saldo'] - $importe);
-      db()->prepare("UPDATE orders SET saldo=? WHERE id=?")->execute([$newSaldo, $order_id]);
-      if ($newSaldo <= 0.00001 && $o['estado'] === 'ENTREGADO') {
-        db()->prepare("UPDATE orders SET estado='CERRADO' WHERE id=?")->execute([$order_id]);
+      if ($order_id > 0) {
+        $so = db()->prepare("SELECT id, estado, saldo FROM orders WHERE id=? AND customer_id=? FOR UPDATE");
+        $so->execute([$order_id, $customer_id]);
+        $o = $so->fetch();
+        if (!$o) throw new Exception('El pedido no existe o no pertenece al cliente.');
       }
-    }
 
-    db()->commit();
-    $flash_ok = "Pago registrado correctamente.";
-    // permanecer en el tab cobrar después de registrar
-    $tab = 'cobrar';
-  } catch (Throwable $e) {
-    db()->rollBack();
-    $flash_err = 'No se pudo registrar el pago: ' . $e->getMessage();
-    $tab = 'cobrar';
+      $sp = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia)
+                           VALUES (?, ?, NOW(), ?, ?, ?)");
+      $sp->execute([$customer_id, $order_id ?: null, $medio, $importe, $referencia]);
+
+      // Ledger ABONO
+      $ss = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
+                           FROM customer_ledger WHERE customer_id=?");
+      $ss->execute([$customer_id]);
+      $saldoAnterior = (float)($ss->fetch()['saldo'] ?? 0);
+
+      $saldoResultante = $saldoAnterior - $importe;
+      $sl = db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
+                           VALUES (?, NOW(), 'ABONO', 'PAGO', ?, ?, ?, ?)");
+      $sl->execute([$customer_id, $order_id ?: null, 'Pago registrado en caja', $importe, $saldoResultante]);
+
+      if ($order_id > 0) {
+        $newSaldo = max(0, (float)$o['saldo'] - $importe);
+        db()->prepare("UPDATE orders SET saldo=? WHERE id=?")->execute([$newSaldo, $order_id]);
+        if ($newSaldo <= 0.00001 && $o['estado'] === 'ENTREGADO') {
+          db()->prepare("UPDATE orders SET estado='CERRADO' WHERE id=?")->execute([$order_id]);
+        }
+      }
+
+      db()->commit();
+      $flash_ok = "Pago registrado correctamente.";
+      $tab = 'cobrar';
+    } catch (Throwable $e) {
+      db()->rollBack();
+      $flash_err = 'No se pudo registrar el pago: ' . $e->getMessage();
+      $tab = 'cobrar';
+    }
+  }
+
+  // --- GASTO ---
+  if ($action === 'registrar_gasto') {
+    $fechaG      = trim($_POST['fecha'] ?? '');
+    $categoria   = trim($_POST['categoria'] ?? '');
+    $medioG      = $_POST['medio'] ?? 'EFECTIVO';
+    $importeG    = max(0, (float)($_POST['importe'] ?? 0));
+    $descripcion = trim($_POST['descripcion'] ?? '');
+
+    try {
+      if ($fechaG === '') {
+        $fechaG = date('Y-m-d H:i:s');
+      } else {
+        // Viene como datetime-local: 2025-11-30T14:30
+        $fechaG = str_replace('T', ' ', $fechaG);
+      }
+
+      if ($categoria === '') {
+        throw new Exception('Debe seleccionar una categoría de gasto.');
+      }
+      if ($importeG <= 0) {
+        throw new Exception('Importe de gasto inválido.');
+      }
+
+      // Permitimos los mismos medios + eventualmente OTRO
+      if (!in_array($medioG, array_merge($MEDIOS, ['OTRO']), true)) {
+        throw new Exception('Medio de pago de gasto inválido.');
+      }
+
+      $userId = (int)user()['id'];
+
+      $sg = db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by)
+                           VALUES (?, ?, ?, ?, ?, ?)");
+      $sg->execute([$fechaG, $categoria, $descripcion, $medioG, $importeG, $userId]);
+
+      $flash_ok = "Gasto registrado correctamente.";
+      $tab = 'gastos';
+    } catch (Throwable $e) {
+      $flash_err = 'No se pudo registrar el gasto: ' . $e->getMessage();
+      $tab = 'gastos';
+    }
   }
 }
 
@@ -97,7 +144,8 @@ $f_customer = (int)($_GET['f_customer'] ?? 0);
 $wherePay = [];
 $paramsPay = [];
 $wherePay[] = "DATE(p.fecha) BETWEEN ? AND ?";
-$paramsPay[] = $desde; $paramsPay[] = $hasta;
+$paramsPay[] = $desde; 
+$paramsPay[] = $hasta;
 if ($f_customer > 0) {
   $wherePay[] = "p.customer_id = ?";
   $paramsPay[] = $f_customer;
@@ -113,6 +161,36 @@ $sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS 
 $stPays = db()->prepare($sqlPays);
 $stPays->execute($paramsPay);
 $pays = $stPays->fetchAll();
+
+// --------------------
+// Filtro de GASTOS
+// --------------------
+$g_desde    = $_GET['g_desde'] ?? date('Y-m-d');
+$g_hasta    = $_GET['g_hasta'] ?? date('Y-m-d');
+$g_categoria = $_GET['g_categoria'] ?? '';
+
+$whereG = [];
+$paramsG = [];
+$whereG[] = "DATE(e.fecha) BETWEEN ? AND ?";
+$paramsG[] = $g_desde;
+$paramsG[] = $g_hasta;
+
+if ($g_categoria !== '') {
+  $whereG[] = "e.categoria = ?";
+  $paramsG[] = $g_categoria;
+}
+
+$whereGSql = 'WHERE ' . implode(' AND ', $whereG);
+
+$sqlG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
+         FROM cash_expenses e
+         LEFT JOIN users u ON u.id = e.created_by
+         $whereGSql
+         ORDER BY e.fecha DESC, e.id DESC
+         LIMIT 200";
+$stG = db()->prepare($sqlG);
+$stG->execute($paramsG);
+$gastos = $stG->fetchAll();
 
 // ---------------------
 // Cuenta Corriente (CC)
@@ -139,9 +217,24 @@ if ($cc_customer > 0) {
 // Resumen diario
 // --------------
 $hoy = date('Y-m-d');
-$stRes = db()->prepare("SELECT medio, SUM(importe) total FROM payments WHERE DATE(fecha)=? GROUP BY medio ORDER BY medio");
+
+// Cobros por medio
+$stRes = db()->prepare("SELECT medio, SUM(importe) AS total 
+                        FROM payments 
+                        WHERE DATE(fecha)=? 
+                        GROUP BY medio 
+                        ORDER BY medio");
 $stRes->execute([$hoy]);
 $resumenHoy = $stRes->fetchAll();
+
+// Gastos por categoría
+$stResG = db()->prepare("SELECT categoria, SUM(importe) AS total
+                         FROM cash_expenses
+                         WHERE DATE(fecha)=?
+                         GROUP BY categoria
+                         ORDER BY categoria");
+$stResG->execute([$hoy]);
+$resumenGastosHoy = $stResG->fetchAll();
 
 function money0($n) { return '$ ' . number_format((float)$n, 0, ',', '.'); }
 
@@ -164,6 +257,9 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link <?= tabActive('recientes',$tab) ?>" id="recientes-tab" data-bs-toggle="tab" data-bs-target="#recientes" type="button" role="tab">Pagos recientes</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link <?= tabActive('gastos',$tab) ?>" id="gastos-tab" data-bs-toggle="tab" data-bs-target="#gastos" type="button" role="tab">Gastos</button>
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link <?= tabActive('cc',$tab) ?>" id="cc-tab" data-bs-toggle="tab" data-bs-target="#cc" type="button" role="tab">Cuenta Corriente</button>
@@ -290,6 +386,109 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
       </div>
     </div>
 
+    <!-- GASTOS -->
+    <div class="tab-pane fade <?= paneActive('gastos',$tab) ?>" id="gastos" role="tabpanel" aria-labelledby="gastos-tab">
+      <div class="row g-3 mb-4">
+        <div class="col-md-5">
+          <h6>Registrar gasto</h6>
+          <form method="post" action="<?= url('caja.php') ?>?tab=gastos" class="border rounded p-3 bg-light">
+            <input type="hidden" name="action" value="registrar_gasto">
+            <div class="mb-2">
+              <label class="form-label">Fecha</label>
+              <input type="datetime-local" name="fecha" class="form-control" value="<?= date('Y-m-d\TH:i') ?>">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Categoría</label>
+              <select name="categoria" class="form-select" required>
+                <option value="">— Seleccionar —</option>
+                <?php foreach ($GASTO_CATEGORIAS as $cat): ?>
+                  <option value="<?= e($cat) ?>"><?= e($cat) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Medio</label>
+              <select name="medio" class="form-select">
+                <?php foreach (array_merge($MEDIOS,['OTRO']) as $m): ?>
+                  <option value="<?= $m ?>"><?= $m ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Importe</label>
+              <input type="number" step="0.01" min="0.01" name="importe" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Descripción</label>
+              <input name="descripcion" class="form-control" placeholder="Ej: Luz, agua, sueldo Juan, etc.">
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-danger">Registrar gasto</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="col-md-7">
+          <h6>Gastos registrados</h6>
+          <form class="row g-2 mb-2" method="get" action="<?= url('caja.php') ?>">
+            <input type="hidden" name="tab" value="gastos">
+            <div class="col-md-3">
+              <label class="form-label">Desde</label>
+              <input type="date" name="g_desde" class="form-control" value="<?= e($g_desde) ?>">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Hasta</label>
+              <input type="date" name="g_hasta" class="form-control" value="<?= e($g_hasta) ?>">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Categoría</label>
+              <select name="g_categoria" class="form-select">
+                <option value="">Todas</option>
+                <?php foreach ($GASTO_CATEGORIAS as $cat): ?>
+                  <option value="<?= e($cat) ?>" <?= $g_categoria===$cat?'selected':'' ?>><?= e($cat) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-2 d-grid">
+              <label class="form-label">&nbsp;</label>
+              <button class="btn btn-outline-secondary">Filtrar</button>
+            </div>
+          </form>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+              <tr>
+                <th style="width:70px;">#</th>
+                <th>Fecha</th>
+                <th>Categoría</th>
+                <th>Medio</th>
+                <th class="text-end">Importe</th>
+                <th>Descripción</th>
+                <th>Usuario</th>
+              </tr>
+              </thead>
+              <tbody>
+              <?php if (!$gastos): ?>
+                <tr><td colspan="7" class="text-center text-muted py-4">No hay gastos en el rango seleccionado.</td></tr>
+              <?php else: foreach ($gastos as $g): ?>
+                <tr>
+                  <td><?= (int)$g['id'] ?></td>
+                  <td><?= e($g['fecha']) ?></td>
+                  <td><?= e($g['categoria']) ?></td>
+                  <td><?= e($g['medio']) ?></td>
+                  <td class="text-end"><?= money($g['importe']) ?></td>
+                  <td><?= e($g['descripcion']) ?></td>
+                  <td><?= e($g['usuario'] ?? '—') ?></td>
+                </tr>
+              <?php endforeach; endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- CUENTA CORRIENTE -->
     <div class="tab-pane fade <?= paneActive('cc',$tab) ?>" id="cc" role="tabpanel" aria-labelledby="cc-tab">
       <form class="row g-2 mb-3" method="get" action="<?= url('caja.php') ?>">
@@ -354,34 +553,79 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
 
     <!-- RESUMEN DIARIO -->
     <div class="tab-pane fade <?= paneActive('resumen',$tab) ?>" id="resumen" role="tabpanel" aria-labelledby="resumen-tab">
-      <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="mb-3">
         <div class="fw-semibold">Hoy (<?= e($hoy) ?>)</div>
       </div>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead class="table-light"><tr><th>Medio</th><th class="text-end">Total</th></tr></thead>
-          <tbody>
-          <?php
-            $tot = 0;
-            if (!$resumenHoy): ?>
-              <tr><td colspan="2" class="text-center text-muted py-3">Sin cobros hoy.</td></tr>
-            <?php else:
-              foreach ($resumenHoy as $r):
-                $tot += (float)$r['total']; ?>
-                <tr>
-                  <td><?= e($r['medio']) ?></td>
-                  <td class="text-end"><?= money($r['total']) ?></td>
-                </tr>
-              <?php endforeach; ?>
-              <tr class="table-light">
-                <td class="fw-semibold">TOTAL</td>
-                <td class="text-end fw-semibold"><?= money($tot) ?></td>
-              </tr>
-            <?php endif; ?>
-          </tbody>
-        </table>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <h6>Cobros por medio</h6>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light"><tr><th>Medio</th><th class="text-end">Total</th></tr></thead>
+              <tbody>
+              <?php
+                $totCobros = 0;
+                if (!$resumenHoy): ?>
+                  <tr><td colspan="2" class="text-center text-muted py-3">Sin cobros hoy.</td></tr>
+                <?php else:
+                  foreach ($resumenHoy as $r):
+                    $totCobros += (float)$r['total']; ?>
+                    <tr>
+                      <td><?= e($r['medio']) ?></td>
+                      <td class="text-end"><?= money($r['total']) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                  <tr class="table-light">
+                    <td class="fw-semibold">TOTAL COBROS</td>
+                    <td class="text-end fw-semibold"><?= money($totCobros) ?></td>
+                  </tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <h6>Gastos por categoría</h6>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light"><tr><th>Categoría</th><th class="text-end">Total</th></tr></thead>
+              <tbody>
+              <?php
+                $totGastos = 0;
+                if (!$resumenGastosHoy): ?>
+                  <tr><td colspan="2" class="text-center text-muted py-3">Sin gastos hoy.</td></tr>
+                <?php else:
+                  foreach ($resumenGastosHoy as $g):
+                    $totGastos += (float)$g['total']; ?>
+                    <tr>
+                      <td><?= e($g['categoria']) ?></td>
+                      <td class="text-end text-danger">-<?= money($g['total']) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                  <tr class="table-light">
+                    <td class="fw-semibold">TOTAL GASTOS</td>
+                    <td class="text-end fw-semibold text-danger">-<?= money($totGastos) ?></td>
+                  </tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-      <p class="small text-muted">Tip: podés filtrar “Pagos recientes” por rango y cliente para cortes no diarios.</p>
+
+      <?php
+        $neto = $totCobros - $totGastos;
+      ?>
+      <div class="mt-3">
+        <div class="alert <?= $neto >= 0 ? 'alert-success' : 'alert-danger' ?> d-flex justify-content-between align-items-center">
+          <span class="fw-semibold">Total neto del día (Cobros - Gastos):</span>
+          <span class="fs-5"><?= money($neto) ?></span>
+        </div>
+      </div>
+
+      <p class="small text-muted">Tip: Podés usar “Pagos recientes” y “Gastos” con rango de fechas para cortes no diarios.</p>
     </div>
 
   </div> <!-- tab-content -->

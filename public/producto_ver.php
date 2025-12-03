@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // Si actualizamos una MP, necesitamos refrescar los precios de TODOS los PT que la usan.
       if ($tipo === 'MP') {
         // En lugar de actualizar todos los PT (como en productos.php), solo actualizamos los dependientes.
-        $dependent_pt_ids = db()->query("SELECT product_pt_id FROM product_bom WHERE component_id = $id")->fetchAll(PDO::FETCHCOLUMN);
+        $dependent_pt_ids = db()->query("SELECT product_pt_id FROM product_bom WHERE component_id = $id")->fetchAll(PDO::FETCH_COLUMN);
         foreach ($dependent_pt_ids as $pt_id) {
             refresh_pt_price((int)$pt_id);
         }
