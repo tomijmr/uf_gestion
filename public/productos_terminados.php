@@ -27,6 +27,8 @@ function refresh_pt_price(int $pt_id): void {
   $s->execute([$pt_id]);
   $margen = (float)($s->fetchColumn() ?? 0);
   $costo = bom_cost_pt($pt_id);
+  // Si el costo BOM es cero, no sobrescribimos un precio manual guardado en la BD.
+  if ($costo <= 0) return;
   $precio = round($costo * (1 + ($margen/100)), 2);
   $u = db()->prepare("UPDATE products SET precio_std=? WHERE id=? AND tipo='PT'");
   $u->execute([$precio, $pt_id]);

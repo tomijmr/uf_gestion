@@ -1,6 +1,6 @@
 <?php
 // app/helpers.php
-function e(string $v): string { return htmlspecialchars($v, ENT_QUOTES, 'UTF-8'); }
+function e($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function money($n): string { return '$ ' . number_format((float)$n, 2, ',', '.'); }
 function today(): string { return (new DateTime('today'))->format('Y-m-d'); }
 

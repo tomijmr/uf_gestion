@@ -28,6 +28,8 @@ function refresh_pt_price(int $pt_id): void {
   $s->execute([$pt_id]);
   $margen = (float)($s->fetchColumn() ?? 0);
   $costo = bom_cost($pt_id);
+  // No sobrescribimos el precio si el costo BOM es 0 (preservar precio manual)
+  if ($costo <= 0) return;
   $precio = round($costo * (1 + ($margen/100)), 2);
   $u = db()->prepare("UPDATE products SET precio_std=? WHERE id=? AND tipo='PT'");
   $u->execute([$precio, $pt_id]);
@@ -56,26 +58,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (!in_array($tipo, ['MP','PT'], true)) throw new Exception('Tipo inválido.');
 
       if ($id > 0) {
-        // --- INICIO CORRECCIÓN para guardar MP COSTO_STD ---
+        // Construimos los campos y parámetros en el mismo orden para evitar desajustes
         $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?";
         $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo];
 
         if ($tipo === 'MP') {
-            // Si es MP, actualizamos el precio_std y el costo_std.
+            // Para MP actualizamos precio_std y costo_std al final
             $setFields .= ", precio_std=?, costo_std=?";
-            // Insertar $precio y $costo_std antes de $activo
-            array_splice($params, 4, 0, [$precio, $costo_std]); 
+            $params[] = $precio;
+            $params[] = $costo_std;
         } else {
-            // Si es PT, solo actualizamos precio_std (que se recalcula)
+            // Para PT actualizamos solo precio_std al final
             $setFields .= ", precio_std=?";
-            array_splice($params, 4, 0, [$precio]);
+            $params[] = $precio;
         }
-        
+
         $sql = "UPDATE products SET $setFields WHERE id=?";
         $params[] = $id;
 
         db()->prepare($sql)->execute($params);
-        // --- FIN CORRECCIÓN ---
+        // fin corrección
 
         if ($tipo === 'PT') {
           // Si el producto que editamos es PT, refrescamos su precio de venta

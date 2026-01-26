@@ -286,7 +286,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div class="col-md-4">
       <div class="card shadow-sm h-100">
         <div class="card-body">
-          <div class="small text-muted">Stock actual PT</div>
+          <div class="small text-muted">Stock actual de Maquinas Terminadas</div>
           <div class="fs-5 fw-semibold mb-1"><?= number_format($stockPTActual, 2, ',', '.') ?></div>
           <div class="small text-muted">Suma de stock_actual de productos tipo PT.</div>
         </div>
