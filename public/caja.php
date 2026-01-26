@@ -30,11 +30,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $medio       = $_POST['medio'] ?? 'EFECTIVO';
     $importe     = max(0, (float)($_POST['importe'] ?? 0));
     $referencia  = trim($_POST['referencia'] ?? '');
+    $bank_account_id = ($medio === 'TRANSFER') ? ((int)($_POST['bank_account_id'] ?? 0)) : null;
+    $third_party_name = trim($_POST['third_party_name'] ?? '');
+    $voucher_path = null;
 
     try {
       if ($customer_id <= 0) throw new Exception('Debe seleccionar un cliente.');
       if (!in_array($medio, $MEDIOS, true)) throw new Exception('Medio de pago inválido.');
       if ($importe <= 0) throw new Exception('Importe inválido.');
+      
+      // Validaciones para transferencias
+      if ($medio === 'TRANSFER') {
+        if (!$bank_account_id) throw new Exception('Debe seleccionar una cuenta bancaria para transferencias.');
+        
+        $stmt_ba = db()->prepare("SELECT nombre FROM bank_accounts WHERE id=?");
+        $stmt_ba->execute([$bank_account_id]);
+        $ba = $stmt_ba->fetch();
+        if (!$ba) throw new Exception('Cuenta bancaria no encontrada.');
+        
+        if ($ba['nombre'] === 'CUENTA TERCERO' && empty($third_party_name)) {
+          throw new Exception('Debe especificar el tercero para transferencias a CUENTA TERCERO.');
+        }
+      }
 
       db()->beginTransaction();
 
@@ -45,9 +62,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$o) throw new Exception('El pedido no existe o no pertenece al cliente.');
       }
 
-      $sp = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia)
-                           VALUES (?, ?, NOW(), ?, ?, ?)");
-      $sp->execute([$customer_id, $order_id ?: null, $medio, $importe, $referencia]);
+      // Procesar archivo comprobante si se cargó
+      if (isset($_FILES['voucher']) && $_FILES['voucher']['error'] !== UPLOAD_ERR_NO_FILE && $_FILES['voucher']['name'] !== '') {
+        $file = $_FILES['voucher'];
+        $allowed_types = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+        
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+          throw new Exception('Error al subir el archivo: ' . $file['error']);
+        }
+        
+        if (!in_array($file['type'], $allowed_types)) {
+          throw new Exception('Solo se permiten archivos PDF, JPG o PNG.');
+        }
+        
+        if ($file['size'] > 5242880) { // 5MB
+          throw new Exception('El archivo no debe superar 5MB.');
+        }
+        
+        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $ext = strtolower($ext);
+        $filename = 'voucher_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $filepath = __DIR__ . '/../storage/vouchers/' . $filename;
+        
+        if (!is_dir(dirname($filepath))) {
+          throw new Exception('La carpeta de almacenamiento no existe.');
+        }
+        
+        if (!is_writable(dirname($filepath))) {
+          throw new Exception('No hay permisos de escritura en la carpeta de almacenamiento.');
+        }
+        
+        if (!move_uploaded_file($file['tmp_name'], $filepath)) {
+          throw new Exception('No se pudo guardar el comprobante. Verifica permisos de la carpeta.');
+        }
+        
+        $voucher_path = '../storage/vouchers/' . $filename;
+      }
+
+      $sp = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, bank_account_id, third_party_name, voucher_path)
+                           VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?)");
+      $sp->execute([$customer_id, $order_id ?: null, $medio, $importe, $referencia, $bank_account_id, $third_party_name ?: null, $voucher_path]);
+      
+      // Obtener el ID del pago recién insertado
+      $payment_id = db()->lastInsertId();
 
       // Ledger ABONO
       $ss = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
@@ -58,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $saldoResultante = $saldoAnterior - $importe;
       $sl = db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
                            VALUES (?, NOW(), 'ABONO', 'PAGO', ?, ?, ?, ?)");
-      $sl->execute([$customer_id, $order_id ?: null, 'Pago registrado en caja', $importe, $saldoResultante]);
+      $sl->execute([$customer_id, $payment_id, 'Pago registrado en caja', $importe, $saldoResultante]);
 
       if ($order_id > 0) {
         $newSaldo = max(0, (float)$o['saldo'] - $importe);
@@ -122,9 +179,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ------------------------------------
-// Datos para selects (clientes/pedidos)
+// Datos para selects (clientes/pedidos/cuentas bancarias)
 // ------------------------------------
 $clientes = db()->query("SELECT id, nombre FROM customers WHERE activo=1 ORDER BY nombre LIMIT 500")->fetchAll();
+$bank_accounts = db()->query("SELECT id, nombre FROM bank_accounts WHERE activo=1 ORDER BY nombre")->fetchAll();
 
 $pref_customer_id = (int)($_GET['customer_id'] ?? 0);
 $pedidos_cliente = [];
@@ -152,9 +210,10 @@ if ($f_customer > 0) {
 }
 $wherePaySql = 'WHERE ' . implode(' AND ', $wherePay);
 
-$sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.order_id
+$sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, p.bank_account_id, p.third_party_name, p.voucher_path, c.nombre AS cliente, p.order_id, ba.nombre AS bank_name
             FROM payments p
             JOIN customers c ON c.id=p.customer_id
+            LEFT JOIN bank_accounts ba ON ba.id=p.bank_account_id
             $wherePaySql
             ORDER BY p.fecha DESC, p.id DESC
             LIMIT 200";
@@ -199,10 +258,13 @@ $cc_customer = (int)($_GET['cc_customer'] ?? 0);
 $cc_rows = [];
 $cc_saldo = null;
 if ($cc_customer > 0) {
-  $stCc = db()->prepare("SELECT id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante
-                         FROM customer_ledger
-                         WHERE customer_id=?
-                         ORDER BY fecha DESC, id DESC
+  $stCc = db()->prepare("SELECT cl.id, cl.fecha, cl.tipo, cl.origen, cl.referencia_id, cl.detalle, cl.monto, cl.saldo_resultante,
+                                p.medio, p.bank_account_id, p.third_party_name, p.voucher_path, p.referencia, ba.nombre AS bank_name
+                         FROM customer_ledger cl
+                         LEFT JOIN payments p ON p.id = cl.referencia_id AND cl.origen = 'PAGO'
+                         LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                         WHERE cl.customer_id=?
+                         ORDER BY cl.fecha DESC, cl.id DESC
                          LIMIT 300");
   $stCc->execute([$cc_customer]);
   $cc_rows = $stCc->fetchAll();
@@ -226,6 +288,22 @@ $stRes = db()->prepare("SELECT medio, SUM(importe) AS total
                         ORDER BY medio");
 $stRes->execute([$hoy]);
 $resumenHoy = $stRes->fetchAll();
+
+// Transferencias a cuentas propias (CUENTA GONZA, CUENTA PAO)
+$stResTransfPropias = db()->prepare("SELECT SUM(p.importe) AS total
+                                      FROM payments p
+                                      JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                                      WHERE DATE(p.fecha)=? AND p.medio='TRANSFER' AND ba.nombre IN ('CUENTA GONZA', 'CUENTA PAO')");
+$stResTransfPropias->execute([$hoy]);
+$transferencias_propias = (float)($stResTransfPropias->fetch()['total'] ?? 0);
+
+// Transferencias a cuentas de terceros
+$stResTransfTerceros = db()->prepare("SELECT SUM(p.importe) AS total
+                                      FROM payments p
+                                      JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                                      WHERE DATE(p.fecha)=? AND p.medio='TRANSFER' AND ba.nombre = 'CUENTA TERCERO'");
+$stResTransfTerceros->execute([$hoy]);
+$transferencias_terceros = (float)($stResTransfTerceros->fetch()['total'] ?? 0);
 
 // Gastos por categoría
 $stResG = db()->prepare("SELECT categoria, SUM(importe) AS total
@@ -273,7 +351,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
 
     <!-- COBRAR -->
     <div class="tab-pane fade <?= paneActive('cobrar',$tab) ?>" id="cobrar" role="tabpanel" aria-labelledby="cobrar-tab">
-      <form class="row g-3" method="post" action="<?= url('caja.php') ?>?tab=cobrar">
+      <form class="row g-3" method="post" action="<?= url('caja.php') ?>?tab=cobrar" enctype="multipart/form-data" id="formCobro">
         <input type="hidden" name="action" value="registrar_pago">
 
         <div class="col-md-6">
@@ -302,7 +380,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
 
         <div class="col-md-3">
           <label class="form-label">Medio</label>
-          <select name="medio" class="form-select">
+          <select name="medio" class="form-select" id="medioSelect" onchange="toggleTransferFields()">
             <?php foreach ($MEDIOS as $m): ?>
               <option value="<?= $m ?>"><?= $m ?></option>
             <?php endforeach; ?>
@@ -319,10 +397,73 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
           <input name="referencia" class="form-control" placeholder="Comprobante, banco, últimos 4, etc.">
         </div>
 
+        <!-- Campos para transferencias -->
+        <div class="col-md-6" id="bankAccountDiv" style="display: none;">
+          <label class="form-label">Cuenta Bancaria *</label>
+          <select name="bank_account_id" class="form-select" id="bankAccountSelect" onchange="toggleThirdPartyField()">
+            <option value="">— Seleccionar —</option>
+            <?php foreach ($bank_accounts as $ba): ?>
+              <option value="<?= (int)$ba['id'] ?>"><?= e($ba['nombre']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+        <div class="col-md-6" id="thirdPartyDiv" style="display: none;">
+          <label class="form-label">Tercero (nombre de quien recibe) *</label>
+          <input type="text" name="third_party_name" class="form-control" placeholder="Ej: Juan Pérez, Acerlot, etc.">
+        </div>
+
+        <!-- Carga de comprobante -->
+        <div class="col-md-6" id="voucherDiv" style="display: none;">
+          <label class="form-label">Comprobante (PDF o Foto)</label>
+          <input type="file" name="voucher" class="form-control" accept=".pdf,.jpg,.jpeg,.png" id="voucherInput">
+          <small class="text-muted">PDF, JPG o PNG. Máximo 5MB</small>
+        </div>
+
         <div class="col-12 d-grid">
-          <button class="btn btn-primary">Registrar pago</button>
+          <button class="btn btn-primary" type="submit">Registrar pago</button>
         </div>
       </form>
+
+      <script>
+        function toggleTransferFields() {
+          const medio = document.getElementById('medioSelect').value;
+          const bankDiv = document.getElementById('bankAccountDiv');
+          const thirdPartyDiv = document.getElementById('thirdPartyDiv');
+          const voucherDiv = document.getElementById('voucherDiv');
+          
+          if (medio === 'TRANSFER') {
+            bankDiv.style.display = 'block';
+            voucherDiv.style.display = 'block';
+            toggleThirdPartyField();
+          } else {
+            bankDiv.style.display = 'none';
+            thirdPartyDiv.style.display = 'none';
+            voucherDiv.style.display = 'none';
+            document.getElementById('bankAccountSelect').value = '';
+            document.getElementById('voucherInput').value = '';
+          }
+        }
+
+        function toggleThirdPartyField() {
+          const bankAccount = document.getElementById('bankAccountSelect').value;
+          const thirdPartyDiv = document.getElementById('thirdPartyDiv');
+          const thirdPartyInput = document.querySelector('input[name="third_party_name"]');
+          
+          // Obtener el texto de la opción seleccionada
+          const select = document.getElementById('bankAccountSelect');
+          const selectedText = select.options[select.selectedIndex]?.text || '';
+          
+          if (selectedText.includes('CUENTA TERCERO')) {
+            thirdPartyDiv.style.display = 'block';
+            thirdPartyInput.required = true;
+          } else {
+            thirdPartyDiv.style.display = 'none';
+            thirdPartyInput.required = false;
+            thirdPartyInput.value = '';
+          }
+        }
+      </script>
     </div>
 
     <!-- PAGOS RECIENTES -->
@@ -358,18 +499,21 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
         <table class="table table-sm align-middle">
           <thead class="table-light">
           <tr>
-            <th style="width:90px;">#</th>
+            <th style="width:70px;">#</th>
             <th>Fecha</th>
             <th>Cliente</th>
             <th>Medio</th>
             <th class="text-end">Importe</th>
             <th>Pedido</th>
+            <th>Cuenta Bancaria</th>
+            <th>Tercero</th>
+            <th>Comprobante</th>
             <th>Referencia</th>
           </tr>
           </thead>
           <tbody>
           <?php if (!$pays): ?>
-            <tr><td colspan="7" class="text-center text-muted py-4">No hay pagos en el rango seleccionado.</td></tr>
+            <tr><td colspan="10" class="text-center text-muted py-4">No hay pagos en el rango seleccionado.</td></tr>
           <?php else: foreach ($pays as $p): ?>
             <tr>
               <td><?= (int)$p['id'] ?></td>
@@ -378,6 +522,15 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
               <td><?= e($p['medio']) ?></td>
               <td class="text-end"><?= money($p['importe']) ?></td>
               <td><?= $p['order_id'] ? '#'.(int)$p['order_id'] : '-' ?></td>
+              <td><?= $p['bank_name'] ? e($p['bank_name']) : '-' ?></td>
+              <td><?= $p['third_party_name'] ? e($p['third_party_name']) : '-' ?></td>
+              <td>
+                <?php if ($p['voucher_path']): ?>
+                  <a href="<?= url($p['voucher_path']) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                <?php else: ?>
+                  -
+                <?php endif; ?>
+              </td>
               <td><?= e($p['referencia']) ?></td>
             </tr>
           <?php endforeach; endif; ?>
@@ -518,29 +671,41 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
           <table class="table table-sm align-middle">
             <thead class="table-light">
             <tr>
-              <th style="width:90px;">#</th>
+              <th style="width:70px;">#</th>
               <th>Fecha</th>
               <th>Tipo</th>
               <th>Origen</th>
-              <th>Ref</th>
-              <th>Detalle</th>
               <th class="text-end">Monto</th>
               <th class="text-end">Saldo</th>
+              <th>Medio</th>
+              <th>Cuenta</th>
+              <th>Tercero</th>
+              <th>Comprobante</th>
+              <th>Referencia</th>
             </tr>
             </thead>
             <tbody>
             <?php if (!$cc_rows): ?>
-              <tr><td colspan="8" class="text-center text-muted py-4">No hay movimientos.</td></tr>
+              <tr><td colspan="11" class="text-center text-muted py-4">No hay movimientos.</td></tr>
             <?php else: foreach ($cc_rows as $m): ?>
               <tr>
                 <td><?= (int)$m['id'] ?></td>
                 <td><?= e($m['fecha']) ?></td>
                 <td><?= e($m['tipo']) ?></td>
                 <td><?= e($m['origen']) ?></td>
-                <td><?= e($m['referencia_id']) ?></td>
-                <td><?= e($m['detalle']) ?></td>
                 <td class="text-end"><?= money($m['monto']) ?></td>
                 <td class="text-end"><?= money($m['saldo_resultante']) ?></td>
+                <td><?= $m['medio'] ? e($m['medio']) : '—' ?></td>
+                <td><?= $m['bank_name'] ? e($m['bank_name']) : '—' ?></td>
+                <td><?= $m['third_party_name'] ? e($m['third_party_name']) : '—' ?></td>
+                <td>
+                  <?php if ($m['voucher_path']): ?>
+                    <a href="<?= url($m['voucher_path']) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                  <?php else: ?>
+                    —
+                  <?php endif; ?>
+                </td>
+                <td><?= e($m['referencia'] ?? $m['detalle']) ?></td>
               </tr>
             <?php endforeach; endif; ?>
             </tbody>
@@ -609,6 +774,39 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                     <td class="text-end fw-semibold text-danger">-<?= money($totGastos) ?></td>
                   </tr>
                 <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resumen de transferencias bancarias -->
+      <div class="row g-3 mt-2">
+        <div class="col-md-6">
+          <h6>Transferencias a cuentas propias</h6>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light"><tr><th>Tipo</th><th class="text-end">Total</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>CUENTA GONZA + CUENTA PAO</td>
+                  <td class="text-end"><?= money($transferencias_propias) ?></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <h6>Transferencias a cuentas de terceros</h6>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light"><tr><th>Tipo</th><th class="text-end">Total</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>CUENTA TERCERO</td>
+                  <td class="text-end"><?= money($transferencias_terceros) ?></td>
+                </tr>
               </tbody>
             </table>
           </div>
