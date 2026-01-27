@@ -7,6 +7,13 @@ require_once __DIR__ . '/../app/helpers.php';
 $flash_ok = '';
 $flash_err = '';
 
+// Asegurar columna para saldo pendiente (si no existe)
+try {
+  db()->exec("ALTER TABLE employees ADD COLUMN IF NOT EXISTS saldo_pendiente DECIMAL(12,2) DEFAULT 0");
+} catch (Throwable $e) {
+  // No bloquear ejecución si ALTER no funciona en versiones antiguas
+}
+
 $validTabs = ['empleados','asistencia','movimientos','resumen','nomina'];
 $tab = $_GET['tab'] ?? 'empleados';
 if (!in_array($tab, $validTabs, true)) $tab = 'empleados';
@@ -77,8 +84,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $flash_err = 'Error: ' . $e->getMessage();
     }
   }
-
-  // REGISTRAR DESCUENTO
   if ($action === 'registrar_descuento') {
     $emp_id = (int)($_POST['employee_id'] ?? 0);
     $tipo = $_POST['tipo'] ?? 'FALTA';
@@ -134,6 +139,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       db()->prepare("INSERT INTO employee_advances (employee_id, monto, fecha_solicitud, fecha_aprobacion, razon, estado) VALUES (?, ?, NOW(), NOW(), ?, 'APROBADO')")
         ->execute([$emp_id, $monto, $razon]);
+      
+      // Registrar el adelanto como gasto en CAJA (cash_expenses)
+      $stmt_emp = db()->prepare("SELECT nombre, apellido FROM employees WHERE id=?");
+      $stmt_emp->execute([$emp_id]);
+      $empleado_data = $stmt_emp->fetch();
+      $empleado_nombre = ($empleado_data['nombre'] ?? '') . ' ' . ($empleado_data['apellido'] ?? '');
+      
+      $descripcion_gasto = "Adelanto de sueldo - {$empleado_nombre}";
+      if ($razon) $descripcion_gasto .= " ({$razon})";
+      
+      $userId = (int)(user()['id'] ?? 0);
+      
+      db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by) VALUES (NOW(), 'SUELDOS', ?, 'EFECTIVO', ?, ?)")
+        ->execute([$descripcion_gasto, $monto, $userId]);
+      
       $flash_ok = "Adelanto registrado.";
       $tab = 'movimientos';
       $selected_emp_id = $emp_id;
@@ -161,12 +181,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($fecha_pago === '') throw new Exception('Selecciona fecha de pago.');
       if ($sueldo_neto <= 0) throw new Exception('Sueldo neto debe ser mayor a 0.');
 
-      db()->prepare("INSERT INTO employee_payroll (employee_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAGADO', ?)")
-        ->execute([$emp_id, $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $notas]);
+      // Calcular lo que correspondería pagar esta semana (incluye saldo pendiente previo)
+      $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
+      $stmt->execute([$emp_id]);
+      $saldo_prev = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
+
+      $owed = $sueldo_base - $descuentos - $adelantos - $prestamos_cuota + $saldo_prev;
+      // Si se paga menos, queda pendiente
+      $remaining = round($owed - $sueldo_neto, 2);
+
+      $estado = $remaining > 0 ? 'PENDIENTE' : 'PAGADO';
+
+      $stmt = db()->prepare("INSERT INTO employee_payroll (employee_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      $stmt->execute([$emp_id, $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $estado, $notas]);
+
+      // Actualizar saldo pendiente en empleados: si remaining > 0, quedó sin pagar; si remaining <= 0, se cubrió
+      if ($remaining > 0) {
+        // Queda monto sin pagar
+        db()->prepare("UPDATE employees SET saldo_pendiente = ? WHERE id = ?")->execute([$remaining, $emp_id]);
+      } else {
+        // Se pagó todo o de más: saldo pendiente = 0
+        db()->prepare("UPDATE employees SET saldo_pendiente = 0 WHERE id = ?")->execute([$emp_id]);
+      }
+
+      // Marcar adelantos como descontados sólo si el pago cubre los adelantos registrados
+      if ($sueldo_neto >= $adelantos) {
+        db()->prepare("UPDATE employee_advances SET estado='DESCONTADO' WHERE employee_id=? AND estado='APROBADO'")
+          ->execute([$emp_id]);
+      }
+
+      // Registrar el pago como gasto en CAJA (cash_expenses)
+      $stmt_emp = db()->prepare("SELECT nombre, apellido FROM employees WHERE id=?");
+      $stmt_emp->execute([$emp_id]);
+      $empleado_data = $stmt_emp->fetch();
+      $empleado_nombre = ($empleado_data['nombre'] ?? '') . ' ' . ($empleado_data['apellido'] ?? '');
       
-      db()->prepare("UPDATE employee_advances SET estado='DESCONTADO' WHERE employee_id=? AND estado='APROBADO' LIMIT 1")
-        ->execute([$emp_id]);
+      $descripcion_gasto = "Pago nómina - {$empleado_nombre}";
+      if ($notas) $descripcion_gasto .= " ({$notas})";
       
+      $userId = (int)(user()['id'] ?? 0);
+      
+      // Convertir fecha a datetime si solo viene como fecha
+      $fecha_gasto = $fecha_pago;
+      if (strlen($fecha_gasto) === 10) {
+        $fecha_gasto .= ' ' . date('H:i:s');
+      }
+      
+      db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by) VALUES (?, 'SUELDOS', ?, ?, ?, ?)")
+        ->execute([$fecha_gasto, $descripcion_gasto, $medio_pago, $sueldo_neto, $userId]);
+
       $flash_ok = "Nómina registrada.";
       $tab = 'nomina';
     } catch (Throwable $e) {
@@ -210,7 +273,11 @@ if ($selected_emp_id > 0) {
     $stmt->execute([$selected_emp_id]);
     $prestamos = $stmt->fetchAll() ?: [];
     
-    $movimientos = array_merge($descuentos, $adelantos, $prestamos);
+    $stmt = db()->prepare("SELECT 'PAGO' AS tipo, id, fecha_pago AS fecha, sueldo_neto AS monto, CONCAT('Pago nómina - ', estado) AS detalle FROM employee_payroll WHERE employee_id=? ORDER BY fecha_pago DESC");
+    $stmt->execute([$selected_emp_id]);
+    $pagos = $stmt->fetchAll() ?: [];
+    
+    $movimientos = array_merge($descuentos, $adelantos, $prestamos, $pagos);
     usort($movimientos, function($a, $b) { 
       $dateA = strtotime($a['fecha'] ?? '0000-00-00');
       $dateB = strtotime($b['fecha'] ?? '0000-00-00');
@@ -240,31 +307,61 @@ if ($selected_employee) {
     $prestamos_stmt->execute([$selected_emp_id]);
     $prestamos_total = (float)($prestamos_stmt->fetch()['total'] ?? 0);
     
-    $saldo_semanal = $sueldo_base - $descuentos_total - $adelantos_total - $prestamos_total;
+    // Incluir saldo pendiente acumulado (carryover)
+    $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
+    $stmt->execute([$selected_emp_id]);
+    $saldo_prev_emp = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
+
+    $saldo_semanal = $sueldo_base - $descuentos_total - $adelantos_total - $prestamos_total + $saldo_prev_emp;
   } catch (Throwable $e) {}
 }
 
-// Resumen de todos los empleados
+// Resumen de todos los empleados - Versión simplificada sin subqueries
 $resumen_empleados = [];
 try {
-  $resumen_empleados = db()->query("SELECT 
-      e.id,
-      CONCAT(e.nombre, ' ', e.apellido) AS nombre_completo,
-      e.sueldo_base_semanal,
-      COALESCE(SUM(CASE WHEN d.tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN d.monto_descuento ELSE 0 END), 0) AS descuentos,
-      (SELECT COALESCE(SUM(monto), 0) FROM employee_advances WHERE employee_id=e.id AND estado='APROBADO') AS adelantos,
-      (SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) FROM employee_loans WHERE employee_id=e.id AND estado='APROBADO') AS cuota_prestamo
-    FROM employees e
-    LEFT JOIN employee_discounts d ON d.employee_id = e.id
-    WHERE e.activo=1
-    GROUP BY e.id, e.nombre, e.apellido, e.sueldo_base_semanal
-    ORDER BY e.nombre, e.apellido")->fetchAll();
-} catch (Throwable $e) {}
+  // Primero, obtener lista de empleados
+  $empleados_base = db()->query("SELECT id, nombre, apellido, sueldo_base_semanal FROM employees WHERE activo=1 ORDER BY nombre, apellido")->fetchAll();
+  
+  // Para cada empleado, calcular sus valores
+  foreach ($empleados_base as $emp) {
+    $emp_id = (int)$emp['id'];
+    
+    // Descuentos
+    $desc = db()->query("SELECT COALESCE(SUM(CASE WHEN tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN monto_descuento ELSE 0 END), 0) AS total FROM employee_discounts WHERE employee_id={$emp_id}")->fetch();
+    $descuentos = (float)($desc['total'] ?? 0);
+    
+    // Adelantos
+    $adel = db()->query("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
+    $adelantos = (float)($adel['total'] ?? 0);
+    
+    // Préstamos
+    $prest = db()->query("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
+    $cuota_prestamo = (float)($prest['total'] ?? 0);
+    
+    $resumen_empleados[] = [
+      'id' => $emp_id,
+      'nombre_completo' => $emp['nombre'] . ' ' . $emp['apellido'],
+      'sueldo_base_semanal' => (float)$emp['sueldo_base_semanal'],
+      'descuentos' => $descuentos,
+      'adelantos' => $adelantos,
+      'cuota_prestamo' => $cuota_prestamo
+    ];
+  }
+} catch (Throwable $e) {
+  error_log("Error cargando resumen: " . $e->getMessage());
+}
 
 // Calcular saldos
 foreach ($resumen_empleados as &$emp) {
-  $emp['saldo'] = $emp['sueldo_base_semanal'] - ($emp['descuentos'] + $emp['adelantos'] + $emp['cuota_prestamo']);
+  // Incluir saldo pendiente por empleado
+  try {
+    $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
+    $stmt->execute([(int)$emp['id']]);
+    $pending = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
+  } catch (Throwable $e) { $pending = 0; }
+  $emp['saldo'] = $emp['sueldo_base_semanal'] - ($emp['descuentos'] + $emp['adelantos'] + $emp['cuota_prestamo']) + $pending;
 }
+unset($emp); // Romper referencia para evitar corrupción en loops siguientes
 
 $attendance_list = [];
 try {
@@ -488,7 +585,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <tr><td colspan="4" class="text-center text-muted py-3">Sin movimientos registrados</td></tr>
                 <?php else: foreach ($movimientos as $m): ?>
                   <tr>
-                    <td><span class="badge bg-<?= $m['tipo']==='DESCUENTO'?'danger':($m['tipo']==='ADELANTO'?'warning':'info') ?>"><?= e($m['tipo']) ?></span></td>
+                    <td><span class="badge bg-<?= $m['tipo']==='DESCUENTO'?'danger':($m['tipo']==='ADELANTO'?'warning':($m['tipo']==='PAGO'?'success':'info')) ?>"><?= e($m['tipo']) ?></span></td>
                     <td><?= e($m['fecha']) ?></td>
                     <td><?= money($m['monto']) ?></td>
                     <td><?= e($m['detalle'] ?? '—') ?></td>
@@ -566,18 +663,16 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <td><?= money($emp['cuota_prestamo']) ?></td>
                 <td class="text-end fw-semibold" style="color: <?= $emp['saldo'] >= 0 ? 'green' : 'red' ?>"><?= money($emp['saldo']) ?></td>
                 <td>
-                  <form method="post" style="display: inline;">
-                    <input type="hidden" name="action" value="registrar_nomina">
-                    <input type="hidden" name="employee_id" value="<?= (int)$emp['id'] ?>">
-                    <input type="hidden" name="fecha_pago" value="<?= date('Y-m-d') ?>">
-                    <input type="hidden" name="sueldo_base" value="<?= (float)$emp['sueldo_base_semanal'] ?>">
-                    <input type="hidden" name="descuentos_total" value="<?= (float)$emp['descuentos'] ?>">
-                    <input type="hidden" name="adelantos_total" value="<?= (float)$emp['adelantos'] ?>">
-                    <input type="hidden" name="prestamos_cuota" value="<?= (float)$emp['cuota_prestamo'] ?>">
-                    <input type="hidden" name="sueldo_neto" value="<?= (float)$emp['saldo'] ?>">
-                    <input type="hidden" name="medio_pago" value="EFECTIVO">
-                    <button type="submit" class="btn btn-success btn-sm">PAGAR</button>
-                  </form>
+                  <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#pagarModal" 
+                    data-empid="<?= (int)$emp['id'] ?>" 
+                    data-empname="<?= e($emp['nombre_completo']) ?>" 
+                    data-sueldo="<?= (float)$emp['sueldo_base_semanal'] ?>" 
+                    data-descuentos="<?= (float)$emp['descuentos'] ?>" 
+                    data-adelantos="<?= (float)$emp['adelantos'] ?>" 
+                    data-prestamos="<?= (float)$emp['cuota_prestamo'] ?>" 
+                    data-saldo="<?= (float)$emp['saldo'] ?>">
+                    PAGAR
+                  </button>
                 </td>
               </tr>
             <?php endforeach; endif; ?>
@@ -603,5 +698,79 @@ include __DIR__ . '/../views/partials/navbar.php';
 
   </div>
 </div>
+
+<!-- Modal: Pagar Nómina -->
+<div class="modal fade" id="pagarModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <form method="post" id="pagar-form">
+        <input type="hidden" name="action" value="registrar_nomina">
+        <input type="hidden" name="employee_id" id="modal_employee_id" value="">
+        <input type="hidden" name="fecha_pago" value="<?= date('Y-m-d') ?>">
+        <input type="hidden" name="sueldo_base" id="modal_sueldo_base" value="0">
+        <input type="hidden" name="descuentos_total" id="modal_descuentos" value="0">
+        <input type="hidden" name="adelantos_total" id="modal_adelantos" value="0">
+        <input type="hidden" name="prestamos_cuota" id="modal_prestamos" value="0">
+        <div class="modal-header">
+          <h5 class="modal-title">Pagar Nómina</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2"><strong id="modal_empname"></strong></div>
+          <div class="mb-2">Sueldo Base: <span id="modal_sueldo_text"></span></div>
+          <div class="mb-2">Descuentos: <span id="modal_desc_text"></span></div>
+          <div class="mb-2">Adelantos: <span id="modal_adel_text"></span></div>
+          <div class="mb-2">Cuota Préstamo: <span id="modal_prest_text"></span></div>
+          <div class="mb-3">
+            <label class="form-label">Monto a pagar</label>
+            <input type="number" step="0.01" min="0" name="sueldo_neto" id="modal_monto_pagar" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">Confirmar pago</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  var pagarModal = document.getElementById('pagarModal');
+  if (pagarModal) {
+    pagarModal.addEventListener('show.bs.modal', function (event) {
+      var button = event.relatedTarget;
+      var empId = button.getAttribute('data-empid');
+      var empName = button.getAttribute('data-empname');
+      var sueldo = parseFloat(button.getAttribute('data-sueldo') || 0);
+      var desc = parseFloat(button.getAttribute('data-descuentos') || 0);
+      var adel = parseFloat(button.getAttribute('data-adelantos') || 0);
+      var prest = parseFloat(button.getAttribute('data-prestamos') || 0);
+      var saldo = parseFloat(button.getAttribute('data-saldo') || 0);
+
+      document.getElementById('modal_employee_id').value = empId;
+      document.getElementById('modal_empname').textContent = empName;
+      document.getElementById('modal_sueldo_base').value = sueldo;
+      document.getElementById('modal_descuentos').value = desc;
+      document.getElementById('modal_adelantos').value = adel;
+      document.getElementById('modal_prestamos').value = prest;
+
+      document.getElementById('modal_sueldo_text').textContent = sueldo.toFixed(2);
+      document.getElementById('modal_desc_text').textContent = desc.toFixed(2);
+      document.getElementById('modal_adel_text').textContent = adel.toFixed(2);
+      document.getElementById('modal_prest_text').textContent = prest.toFixed(2);
+      document.getElementById('modal_monto_pagar').value = saldo.toFixed(2);
+    });
+  }
+
+  // Opcional: validar antes de enviar
+  document.getElementById('pagar-form')?.addEventListener('submit', function(e){
+    var monto = parseFloat(document.getElementById('modal_monto_pagar').value || 0);
+    if (isNaN(monto) || monto <= 0) {
+      e.preventDefault();
+      alert('Ingrese un monto válido para pagar');
+    }
+  });
+</script>
 
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>
