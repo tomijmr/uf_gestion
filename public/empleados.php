@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // CREAR/EDITAR EMPLEADO
   if ($action === 'guardar_empleado') {
-    $emp_id = (int)($_POST['employee_id'] ?? 0);
+    $emp_id = (int)($_POST['employee_id'] ?? '');
     $nombre = trim($_POST['nombre'] ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $telefono = trim($_POST['telefono'] ?? '');
