@@ -180,8 +180,14 @@ $st->execute($params);
 $rows = $st->fetchAll();
 
 function page_url(int $p): string {
-  $qs = $_GET; $qs['page'] = $p;
-  return url('productos.php') . '?' . http_build_query($qs);
+  global $selected_tipo_ui;
+  $qs = $_GET; 
+  $qs['page'] = $p;
+  // Asegurar que el tipo se preserve en la paginación
+  if ($selected_tipo_ui !== '') {
+    $qs['tipo'] = $selected_tipo_ui;
+  }
+  return url('productos_terminados.php') . '?' . http_build_query($qs);
 }
 
 function badge_margen(?float $m): string {
@@ -200,7 +206,7 @@ function badge_margen(?float $m): string {
   <?php if ($flash_ok): ?><div class="alert alert-success"><?= e($flash_ok) ?></div><?php endif; ?>
   <?php if ($flash_err): ?><div class="alert alert-danger"><?= e($flash_err) ?></div><?php endif; ?>
 
-  <form class="row g-2 mb-3" method="get" action="<?= url('productos.php') ?>">
+  <form class="row g-2 mb-3" method="get" action="<?= url('productos_terminados.php') ?>">
     <div class="col-md-6">
       <input class="form-control" name="q" value="<?= e($q) ?>" placeholder="Buscar por Código / Nombre">
     </div>
@@ -216,7 +222,7 @@ function badge_margen(?float $m): string {
       <button class="btn btn-outline-secondary">Filtrar</button>
     </div>
     <div class="col-md-2 d-grid">
-      <a class="btn btn-outline-secondary" href="<?= url('productos.php') ?>">Limpiar</a>
+      <a class="btn btn-outline-secondary" href="<?= url('productos_terminados.php') ?>">Limpiar</a>
     </div>
   </form>
 
