@@ -177,7 +177,13 @@ $st->execute($params);
 $rows = $st->fetchAll();
 
 function page_url(int $p): string {
-  $qs = $_GET; $qs['page'] = $p;
+  global $selected_tipo_ui;
+  $qs = $_GET; 
+  $qs['page'] = $p;
+  // Asegurar que el tipo se preserve en la paginación
+  if ($selected_tipo_ui !== '') {
+    $qs['tipo'] = $selected_tipo_ui;
+  }
   return url('productos.php') . '?' . http_build_query($qs);
 }
 
