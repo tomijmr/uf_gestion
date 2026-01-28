@@ -139,7 +139,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notas = trim($_POST['notas'] ?? '');
 
     try {
-      if ($emp_id <= 0) throw new Exception('Selecciona un empleado.');
+      if ($emp_id <= 0) {
+        // Debug: mostrar qué viene en POST
+        error_log("DEBUG empleados.php - POST data: " . print_r($_POST, true));
+        throw new Exception('Selecciona un empleado.');
+      }
       if ($fecha === '') throw new Exception('Selecciona una fecha.');
 
       db()->prepare("INSERT INTO employee_attendance (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras, presente, justificado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ingreso_manana=?, ingreso_tarde=?, horas_extras=?, presente=?, justificado=?, notas=?")
@@ -612,7 +616,7 @@ include __DIR__ . '/../views/partials/navbar.php';
             <div class="mb-2"><label class="form-label">Ingreso Mañana</label><input type="time" name="ingreso_manana" class="form-control"></div>
             <div class="mb-2"><label class="form-label">Ingreso Tarde</label><input type="time" name="ingreso_tarde" class="form-control"></div>
             <div class="mb-2"><label class="form-label">Horas Extra</label><input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0"></div>
-            <div class="mb-2"><label><input type="checkbox" name="presente" value="1" checked> Presente</label></div>
+            <div class="mb-2"><label><input type="hidden" name="presente" value="0"><input type="checkbox" name="presente" value="1" checked> Presente</label></div>
             <div class="mb-3"><label class="form-label">Notas</label><textarea name="notas" class="form-control" rows="2"></textarea></div>
             <div class="d-grid"><button type="submit" class="btn btn-primary">Registrar</button></div>
           </form>
