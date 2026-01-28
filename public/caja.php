@@ -4,6 +4,11 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+
 $flash_ok = '';
 $flash_err = '';
 

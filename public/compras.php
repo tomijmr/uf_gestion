@@ -5,6 +5,14 @@ require_role('ADMIN','DEPOSITO');
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Source - https://stackoverflow.com/q
+// Posted by Abs, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-01-28, License - CC BY-SA 4.0
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+
 $flash_ok = $_GET['ok'] ?? '';
 $flash_err = $_GET['err'] ?? '';
 
