@@ -196,7 +196,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           throw new Exception('No se pudo guardar el comprobante.');
         }
         
-        $P['voucher_path'] = '../storage/vouchers/' . $filename;
+        // Guardar solo el nombre del archivo
+        $P['voucher_path'] = $filename;
       } catch (Exception $e) {
         $error = $e->getMessage();
       }

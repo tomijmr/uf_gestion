@@ -101,7 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           throw new Exception('No se pudo guardar el comprobante. Verifica permisos de la carpeta.');
         }
         
-        $voucher_path = '../storage/vouchers/' . $filename;
+        // Guardar solo el nombre del archivo
+        $voucher_path = $filename;
       }
 
       $sp = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, bank_account_id, third_party_name, voucher_path)
@@ -548,7 +549,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
               <td><?= $p['third_party_name'] ? e($p['third_party_name']) : '-' ?></td>
               <td>
                 <?php if ($p['voucher_path']): ?>
-                  <a href="<?= url($p['voucher_path']) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                  <a href="<?= url('voucher.php?file=' . urlencode($p['voucher_path'])) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
                 <?php else: ?>
                   -
                 <?php endif; ?>
@@ -728,7 +729,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                 <td><?= $m['third_party_name'] ? e($m['third_party_name']) : '—' ?></td>
                 <td>
                   <?php if ($m['voucher_path']): ?>
-                    <a href="<?= url($m['voucher_path']) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                    <a href="<?= url('voucher.php?file=' . urlencode($m['voucher_path'])) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
                   <?php else: ?>
                     —
                   <?php endif; ?>
