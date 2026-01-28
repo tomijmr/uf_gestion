@@ -81,6 +81,7 @@ $fe_desde = trim($_GET['desde'] ?? '');
 $fe_hasta = trim($_GET['hasta'] ?? '');
 $q        = trim($_GET['q'] ?? '');
 $estado   = trim($_GET['estado'] ?? '');
+$orden_fecha = $_GET['orden_fecha'] ?? 'DESC';
 
 $page  = max(1, (int)($_GET['page'] ?? 1));
 $limit = 20;
@@ -115,6 +116,9 @@ if ($fe_hasta !== '') {
 
 $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
+// Validar orden
+$orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
+
 // Totales
 $sqlCount = "SELECT COUNT(*) total
              FROM orders o
@@ -126,11 +130,11 @@ $total = (int)$st->fetch()['total'];
 $pages = max(1, (int)ceil($total / $limit));
 
 // Datos
-$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, c.nombre AS cliente
+$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.transporte_bonificado, o.empresa_transporte, c.nombre AS cliente
         FROM orders o
         JOIN customers c ON c.id=o.customer_id
         $whereSql
-        ORDER BY o.fecha DESC, o.id DESC
+        ORDER BY o.fecha $orden_fecha, o.id $orden_fecha
         LIMIT $limit OFFSET $off";
 $st = db()->prepare($sql);
 $st->execute($params);
@@ -183,8 +187,8 @@ include __DIR__ . '/../views/partials/navbar.php';
   <?php endif; ?>
 
   <form class="row g-2 mb-3" method="get" action="<?= url('pedidos.php') ?>">
-    <div class="col-md-3">
-      <input class="form-control" name="q" value="<?= e($q) ?>" placeholder="ID Pedido o Cliente">
+    <div class="col-md-2">
+      <input class="form-control" name="q" value="<?= e($q) ?>" placeholder="ID o Cliente">
     </div>
     <div class="col-md-2">
       <select name="estado" class="form-select">
@@ -195,12 +199,18 @@ include __DIR__ . '/../views/partials/navbar.php';
       </select>
     </div>
     <div class="col-md-2">
-      <input type="date" name="desde" class="form-control" value="<?= e($fe_desde) ?>">
+      <input type="date" name="desde" class="form-control" value="<?= e($fe_desde) ?>" placeholder="Desde">
     </div>
     <div class="col-md-2">
-      <input type="date" name="hasta" class="form-control" value="<?= e($fe_hasta) ?>">
+      <input type="date" name="hasta" class="form-control" value="<?= e($fe_hasta) ?>" placeholder="Hasta">
     </div>
-    <div class="col-md-3 d-grid">
+    <div class="col-md-2">
+      <select name="orden_fecha" class="form-select">
+        <option value="DESC" <?= $orden_fecha==='DESC'?'selected':'' ?>>Más recientes</option>
+        <option value="ASC" <?= $orden_fecha==='ASC'?'selected':'' ?>>Más antiguos</option>
+      </select>
+    </div>
+    <div class="col-md-2 d-grid">
       <button class="btn btn-outline-secondary">Filtrar</button>
     </div>
   </form>
@@ -250,7 +260,26 @@ include __DIR__ . '/../views/partials/navbar.php';
               <tr class="collapse" id="it<?= (int)$r['id'] ?>">
                 <td colspan="8" class="bg-light">
                   <div class="p-3">
-                    <div class="fw-semibold mb-2">Ítems del pedido #<?= (int)$r['id'] ?></div>
+                    <div class="row mb-3">
+                      <div class="col-md-6">
+                        <div class="fw-semibold mb-2">Ítems del pedido #<?= (int)$r['id'] ?></div>
+                      </div>
+                      <div class="col-md-6 text-end">
+                        <div class="small">
+                          <span class="badge <?= $r['senia'] > 0 ? 'bg-success' : 'bg-secondary' ?>">
+                            <?= $r['senia'] > 0 ? 'Señado: ' . money($r['senia']) : 'Sin seña' ?>
+                          </span>
+                          <span class="badge <?= $r['transporte_bonificado'] ? 'bg-info' : 'bg-secondary' ?> ms-1">
+                            <?= $r['transporte_bonificado'] ? 'Transporte bonificado' : 'Transporte no bonificado' ?>
+                          </span>
+                          <?php if ($r['empresa_transporte']): ?>
+                            <span class="badge bg-primary ms-1">
+                              <?= e($r['empresa_transporte']) ?>
+                            </span>
+                          <?php endif; ?>
+                        </div>
+                      </div>
+                    </div>
                     <div class="table-responsive">
                       <table class="table table-sm mb-0">
                         <thead>

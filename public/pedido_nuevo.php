@@ -4,6 +4,14 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Asegurar columnas de transporte en orders
+try {
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS transporte_bonificado TINYINT(1) DEFAULT 0");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS empresa_transporte VARCHAR(100) NULL");
+} catch (Throwable $e) {
+  // Silenciar errores de compatibilidad
+}
+
 // Borrador de pedido en sesión
 if (!isset($_SESSION['pedido'])) {
   $_SESSION['pedido'] = [
@@ -12,6 +20,13 @@ if (!isset($_SESSION['pedido'])) {
     'senia' => 0.0,
     'medio' => 'EFECTIVO',
     'observaciones' => '',
+    'transporte_bonificado' => 0,
+    'empresa_transporte' => '',
+    'voucher_path' => null,
+    'bank_account_id' => null,
+    'third_party_name' => '',
+    'fecha_entrega' => '',
+    'dias_entrega' => '',
   ];
 }
 $P =& $_SESSION['pedido'];
@@ -136,6 +151,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $P['senia'] = max(0, (float)($_POST['senia'] ?? 0));
     $P['medio'] = $_POST['medio'] ?? 'EFECTIVO';
     $P['observaciones'] = trim($_POST['observaciones'] ?? '');
+    $P['transporte_bonificado'] = (int)($_POST['transporte_bonificado'] ?? 0);
+    $P['empresa_transporte'] = trim($_POST['empresa_transporte'] ?? '');
+    $P['bank_account_id'] = ($P['medio'] === 'TRANSFER') ? ((int)($_POST['bank_account_id'] ?? 0)) : null;
+    $P['third_party_name'] = trim($_POST['third_party_name'] ?? '');
+    $P['dias_entrega'] = trim($_POST['dias_entrega'] ?? '');
+    $P['fecha_entrega'] = trim($_POST['fecha_entrega'] ?? '');
+    
+    // Calcular fecha de entrega si se eligió días
+    if ($P['dias_entrega'] !== '' && $P['dias_entrega'] !== 'manual') {
+      $dias = (int)$P['dias_entrega'];
+      $P['fecha_entrega'] = date('Y-m-d', strtotime("+$dias days"));
+    }
+    
+    // Procesar comprobante si se cargó
+    $P['voucher_path'] = null;
+    if (isset($_FILES['voucher']) && $_FILES['voucher']['error'] !== UPLOAD_ERR_NO_FILE && $_FILES['voucher']['name'] !== '') {
+      try {
+        $file = $_FILES['voucher'];
+        $allowed_types = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+        
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+          throw new Exception('Error al subir el archivo: ' . $file['error']);
+        }
+        
+        if (!in_array($file['type'], $allowed_types)) {
+          throw new Exception('Solo se permiten archivos PDF, JPG o PNG.');
+        }
+        
+        if ($file['size'] > 5242880) { // 5MB
+          throw new Exception('El archivo no debe superar 5MB.');
+        }
+        
+        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $ext = strtolower($ext);
+        $filename = 'voucher_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $filepath = __DIR__ . '/../storage/vouchers/' . $filename;
+        
+        if (!is_dir(dirname($filepath))) {
+          mkdir(dirname($filepath), 0777, true);
+        }
+        
+        if (!move_uploaded_file($file['tmp_name'], $filepath)) {
+          throw new Exception('No se pudo guardar el comprobante.');
+        }
+        
+        $P['voucher_path'] = '../storage/vouchers/' . $filename;
+      } catch (Exception $e) {
+        $error = $e->getMessage();
+      }
+    }
+    
     $step = 3;
   }
 
@@ -156,11 +222,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saldo       = max(0, $total_neto - $senia);
 
         // Crear pedido
-        $sqlOrder = "INSERT INTO orders (customer_id, fecha, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones)
-                     VALUES (?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
         db()->prepare($sqlOrder)->execute([
-          $P['customer_id'], date('Y-m-d H:i:s'), 'CONFIRMADO',
-          $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones']
+          $P['customer_id'], date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'CONFIRMADO',
+          $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
+          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null
         ]);
         $order_id = (int)db()->lastInsertId();
 
@@ -214,9 +281,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Seña opcional
         if ($senia > 0) {
-          db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia)
-                         VALUES (?,?,?,?,?,?)")
-            ->execute([$cid, $order_id, date('Y-m-d H:i:s'), $P['medio'], $senia, 'Seña']);
+          db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, voucher_path, bank_account_id, third_party_name)
+                         VALUES (?,?,?,?,?,?,?,?,?)")
+            ->execute([$cid, $order_id, date('Y-m-d H:i:s'), $P['medio'], $senia, 'Seña', $P['voucher_path'], $P['bank_account_id'], $P['third_party_name'] ?: null]);
 
           $saldoResult = $saldoResult - $senia;
           db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
@@ -462,6 +529,9 @@ if ($step === 3):
   $total = pedido_total_bruto($P['items']);
   $descuento = 0; $neto = $total - $descuento;
   $senia = (float)$P['senia']; $saldo = max(0, $neto - $senia);
+  
+  // Cargar cuentas bancarias
+  $bank_accounts = db()->query("SELECT id, nombre FROM bank_accounts WHERE activo=1 ORDER BY nombre")->fetchAll();
   ?>
   <div class="container py-4">
     <h5 class="mb-1">Nuevo Pedido — Paso 3: Pago y Confirmación</h5>
@@ -510,7 +580,7 @@ if ($step === 3):
         <div class="card shadow-sm mb-3">
           <div class="card-body">
             <h6 class="mb-3">Pago (opcional)</h6>
-            <form method="post" class="row g-2">
+            <form method="post" class="row g-2" enctype="multipart/form-data">
               <input type="hidden" name="action" value="set_payment">
               <div class="col-6">
                 <label class="form-label">Seña</label>
@@ -518,21 +588,130 @@ if ($step === 3):
               </div>
               <div class="col-6">
                 <label class="form-label">Medio</label>
-                <select name="medio" class="form-select">
+                <select name="medio" class="form-select" id="medioSelect" onchange="toggleTransferFields()">
                   <?php foreach (['EFECTIVO','DEBITO','TRANSFER','CREDITO','NC'] as $m): ?>
                     <option value="<?= $m ?>" <?= $P['medio']===$m?'selected':'' ?>><?= $m ?></option>
                   <?php endforeach; ?>
                 </select>
               </div>
+              
+              <!-- Cuenta bancaria para transferencias -->
+              <div class="col-12" id="bankAccountDiv" style="display: <?= $P['medio'] === 'TRANSFER' ? 'block' : 'none' ?>;">
+                <label class="form-label">Cuenta Bancaria *</label>
+                <select name="bank_account_id" class="form-select" id="bankAccountSelect" onchange="toggleThirdPartyField()">
+                  <option value="">— Seleccionar —</option>
+                  <?php foreach ($bank_accounts as $ba): ?>
+                    <option value="<?= (int)$ba['id'] ?>" <?= $P['bank_account_id'] === (int)$ba['id'] ? 'selected' : '' ?>><?= e($ba['nombre']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              
+              <!-- Tercero si es CUENTA TERCERO -->
+              <div class="col-12" id="thirdPartyDiv" style="display: none;">
+                <label class="form-label">Tercero (nombre de quien recibe) *</label>
+                <input type="text" name="third_party_name" class="form-control" value="<?= e($P['third_party_name']) ?>" placeholder="Ej: Juan Pérez, Acerlot, etc.">
+              </div>
+              
+              <!-- Comprobante para transferencias -->
+              <div class="col-12" id="voucherDiv" style="display: <?= $P['medio'] === 'TRANSFER' ? 'block' : 'none' ?>;">
+                <label class="form-label">Comprobante (PDF o Foto)</label>
+                <input type="file" name="voucher" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+                <small class="text-muted">PDF, JPG o PNG. Máximo 5MB</small>
+                <?php if (!empty($P['voucher_path'])): ?>
+                  <div class="mt-1"><small class="text-success">✓ Comprobante cargado</small></div>
+                <?php endif; ?>
+              </div>
+              
               <div class="col-12">
                 <label class="form-label">Observaciones</label>
                 <textarea name="observaciones" class="form-control" rows="2"><?= e($P['observaciones']) ?></textarea>
+              </div>
+              
+              <div class="col-12">
+                <label class="form-label">Fecha de Entrega</label>
+                <div class="row g-2">
+                  <div class="col-6">
+                    <select name="dias_entrega" class="form-select" id="diasEntrega" onchange="toggleFechaManual()">
+                      <option value="">— Seleccionar —</option>
+                      <option value="30" <?= $P['dias_entrega'] === '30' ? 'selected' : '' ?>>30 días</option>
+                      <option value="45" <?= $P['dias_entrega'] === '45' ? 'selected' : '' ?>>45 días</option>
+                      <option value="60" <?= $P['dias_entrega'] === '60' ? 'selected' : '' ?>>60 días</option>
+                      <option value="manual" <?= $P['dias_entrega'] === 'manual' ? 'selected' : '' ?>>Fecha manual</option>
+                    </select>
+                  </div>
+                  <div class="col-6" id="fechaManualDiv" style="display: <?= $P['dias_entrega'] === 'manual' ? 'block' : 'none' ?>;">
+                    <input type="date" name="fecha_entrega" class="form-control" value="<?= e($P['fecha_entrega']) ?>">
+                  </div>
+                </div>
+                <?php if ($P['fecha_entrega'] && $P['dias_entrega'] !== 'manual'): ?>
+                  <small class="text-muted">Calculado: <?= e($P['fecha_entrega']) ?></small>
+                <?php endif; ?>
+              </div>
+              
+              <div class="col-12">
+                <label class="form-label">Empresa de Transporte</label>
+                <input type="text" name="empresa_transporte" class="form-control" value="<?= e($P['empresa_transporte']) ?>" placeholder="Ej: Andreani, OCA, etc.">
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="transporte_bonificado" value="1" id="transp_bonif" <?= $P['transporte_bonificado'] ? 'checked' : '' ?>>
+                  <label class="form-check-label" for="transp_bonif">
+                    Transporte bonificado
+                  </label>
+                </div>
               </div>
               <div class="col-12 d-flex justify-content-between">
                 <a class="btn btn-outline-secondary" href="<?= url('pedido_nuevo.php') ?>?step=2">« Volver a Ítems</a>
                 <button class="btn btn-outline-primary">Guardar cambios</button>
               </div>
             </form>
+            
+            <script>
+              function toggleFechaManual() {
+                const select = document.getElementById('diasEntrega');
+                const div = document.getElementById('fechaManualDiv');
+                div.style.display = select.value === 'manual' ? 'block' : 'none';
+              }
+              
+              function toggleTransferFields() {
+                const medio = document.getElementById('medioSelect').value;
+                const bankDiv = document.getElementById('bankAccountDiv');
+                const voucherDiv = document.getElementById('voucherDiv');
+                const thirdPartyDiv = document.getElementById('thirdPartyDiv');
+                
+                if (medio === 'TRANSFER') {
+                  bankDiv.style.display = 'block';
+                  voucherDiv.style.display = 'block';
+                  toggleThirdPartyField();
+                } else {
+                  bankDiv.style.display = 'none';
+                  voucherDiv.style.display = 'none';
+                  thirdPartyDiv.style.display = 'none';
+                }
+              }
+              
+              function toggleThirdPartyField() {
+                const bankAccountSelect = document.getElementById('bankAccountSelect');
+                const thirdPartyDiv = document.getElementById('thirdPartyDiv');
+                
+                if (!bankAccountSelect) return;
+                
+                const selectedOption = bankAccountSelect.options[bankAccountSelect.selectedIndex];
+                const accountName = selectedOption ? selectedOption.text : '';
+                
+                if (accountName === 'CUENTA TERCERO') {
+                  thirdPartyDiv.style.display = 'block';
+                } else {
+                  thirdPartyDiv.style.display = 'none';
+                }
+              }
+              
+              // Inicializar al cargar la página
+              document.addEventListener('DOMContentLoaded', function() {
+                toggleTransferFields();
+                toggleFechaManual();
+              });
+            </script>
           </div>
         </div>
 

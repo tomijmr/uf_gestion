@@ -198,6 +198,7 @@ if ($pref_customer_id > 0) {
 $desde = $_GET['desde'] ?? date('Y-m-d');
 $hasta = $_GET['hasta'] ?? date('Y-m-d');
 $f_customer = (int)($_GET['f_customer'] ?? 0);
+$orden_fecha = $_GET['orden_fecha'] ?? 'DESC'; // DESC = más recientes primero, ASC = más antiguos primero
 
 $wherePay = [];
 $paramsPay = [];
@@ -210,12 +211,15 @@ if ($f_customer > 0) {
 }
 $wherePaySql = 'WHERE ' . implode(' AND ', $wherePay);
 
+// Validar orden
+$orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
+
 $sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, p.bank_account_id, p.third_party_name, p.voucher_path, c.nombre AS cliente, p.order_id, ba.nombre AS bank_name
             FROM payments p
             JOIN customers c ON c.id=p.customer_id
             LEFT JOIN bank_accounts ba ON ba.id=p.bank_account_id
             $wherePaySql
-            ORDER BY p.fecha DESC, p.id DESC
+            ORDER BY p.fecha $orden_fecha, p.id $orden_fecha
             LIMIT 200";
 $stPays = db()->prepare($sqlPays);
 $stPays->execute($paramsPay);
@@ -224,9 +228,12 @@ $pays = $stPays->fetchAll();
 // --------------------
 // Filtro de GASTOS
 // --------------------
+// Filtro de GASTOS
+// --------------------
 $g_desde    = $_GET['g_desde'] ?? date('Y-m-d');
 $g_hasta    = $_GET['g_hasta'] ?? date('Y-m-d');
 $g_categoria = $_GET['g_categoria'] ?? '';
+$g_orden_fecha = $_GET['g_orden_fecha'] ?? 'DESC';
 
 $whereG = [];
 $paramsG = [];
@@ -241,11 +248,14 @@ if ($g_categoria !== '') {
 
 $whereGSql = 'WHERE ' . implode(' AND ', $whereG);
 
+// Validar orden
+$g_orden_fecha = in_array($g_orden_fecha, ['ASC', 'DESC']) ? $g_orden_fecha : 'DESC';
+
 $sqlG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
          FROM cash_expenses e
          LEFT JOIN users u ON u.id = e.created_by
          $whereGSql
-         ORDER BY e.fecha DESC, e.id DESC
+         ORDER BY e.fecha $g_orden_fecha, e.id $g_orden_fecha
          LIMIT 200";
 $stG = db()->prepare($sqlG);
 $stG->execute($paramsG);
@@ -470,15 +480,15 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
     <div class="tab-pane fade <?= paneActive('recientes',$tab) ?>" id="recientes" role="tabpanel" aria-labelledby="recientes-tab">
       <form class="row g-2 mb-3" method="get" action="<?= url('caja.php') ?>">
         <input type="hidden" name="tab" value="recientes">
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Desde</label>
           <input type="date" name="desde" class="form-control" value="<?= e($desde) ?>">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Hasta</label>
           <input type="date" name="hasta" class="form-control" value="<?= e($hasta) ?>">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
           <label class="form-label">Cliente</label>
           <select name="f_customer" class="form-select">
             <option value="0">Todos</option>
@@ -487,6 +497,13 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                 <?= e($c['nombre']) ?>
               </option>
             <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Ordenar por fecha</label>
+          <select name="orden_fecha" class="form-select">
+            <option value="DESC" <?= $orden_fecha==='DESC'?'selected':'' ?>>Más recientes primero</option>
+            <option value="ASC" <?= $orden_fecha==='ASC'?'selected':'' ?>>Más antiguos primero</option>
           </select>
         </div>
         <div class="col-md-2 d-grid">
@@ -593,7 +610,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
               <label class="form-label">Hasta</label>
               <input type="date" name="g_hasta" class="form-control" value="<?= e($g_hasta) ?>">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Categoría</label>
               <select name="g_categoria" class="form-select">
                 <option value="">Todas</option>
@@ -602,8 +619,14 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                 <?php endforeach; ?>
               </select>
             </div>
-            <div class="col-md-2 d-grid">
-              <label class="form-label">&nbsp;</label>
+            <div class="col-md-3">
+              <label class="form-label">Ordenar</label>
+              <select name="g_orden_fecha" class="form-select">
+                <option value="DESC" <?= $g_orden_fecha==='DESC'?'selected':'' ?>>Más recientes</option>
+                <option value="ASC" <?= $g_orden_fecha==='ASC'?'selected':'' ?>>Más antiguos</option>
+              </select>
+            </div>
+            <div class="col-md-12 d-grid">
               <button class="btn btn-outline-secondary">Filtrar</button>
             </div>
           </form>

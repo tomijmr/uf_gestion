@@ -11,6 +11,7 @@ $flash_err = $_GET['err'] ?? '';
 $q       = trim($_GET['q'] ?? '');
 $fdesde  = trim($_GET['fdesde'] ?? '');
 $fhasta  = trim($_GET['fhasta'] ?? '');
+$orden_fecha = $_GET['orden_fecha'] ?? 'DESC';
 
 $where = [];
 $params = [];
@@ -36,6 +37,9 @@ if ($fhasta !== '') {
 
 $whereSQL = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 
+// Validar orden
+$orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
+
 /* --- Paginación --- */
 $page  = max(1, (int)($_GET['page'] ?? 1));
 $limit = 25;
@@ -52,7 +56,7 @@ $sql = "SELECT p.*, u.nombre AS usuario
         FROM purchases p
         LEFT JOIN users u ON u.id = p.created_by
         $whereSQL
-        ORDER BY p.fecha DESC, p.id DESC
+        ORDER BY p.fecha $orden_fecha, p.id $orden_fecha
         LIMIT $limit OFFSET $off";
 $st = db()->prepare($sql);
 $st->execute($params);
@@ -101,12 +105,20 @@ include __DIR__ . '/../views/partials/navbar.php';
       <input type="date" class="form-control" name="fhasta" value="<?= e($fhasta) ?>">
     </div>
 
+    <div class="col-md-2">
+      <label class="form-label">Ordenar</label>
+      <select name="orden_fecha" class="form-select">
+        <option value="DESC" <?= $orden_fecha==='DESC'?'selected':'' ?>>Más recientes</option>
+        <option value="ASC" <?= $orden_fecha==='ASC'?'selected':'' ?>>Más antiguos</option>
+      </select>
+    </div>
+
     <div class="col-md-2 d-grid">
       <label class="form-label">&nbsp;</label>
       <button class="btn btn-outline-secondary">Filtrar</button>
     </div>
 
-    <div class="col-md-2 d-grid">
+    <div class="col-md-1 d-grid">
       <label class="form-label">&nbsp;</label>
       <a class="btn btn-outline-secondary" href="<?= url('compras.php') ?>">Limpiar</a>
     </div>

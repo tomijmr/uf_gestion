@@ -39,9 +39,34 @@ foreach ($alerts as $a) {
   elseif ($gap <= 0) $warn++;
 }
 
+// Alertas de pedidos próximos a entregar (dentro de 7 días o ya vencidos)
+$sqlPedidos = "
+  SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, c.nombre AS cliente,
+         DATEDIFF(o.fecha_entrega, CURDATE()) AS dias_restantes
+  FROM orders o
+  JOIN customers c ON c.id = o.customer_id
+  WHERE o.fecha_entrega IS NOT NULL
+    AND o.estado NOT IN ('ENTREGADO', 'CERRADO')
+    AND o.fecha_entrega <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+  ORDER BY o.fecha_entrega ASC
+  LIMIT 50
+";
+$pedidosProximos = db()->query($sqlPedidos)->fetchAll();
+
 function badge_severity($disp, $min) {
   if ($disp <= 0) return '<span class="badge bg-danger">Crítico</span>';
   return '<span class="badge bg-warning text-dark">Bajo mínimo</span>';
+}
+
+function badge_estado_pedido($estado) {
+  $map = [
+    'CONFIRMADO' => 'info',
+    'EN_PRODUCCION' => 'warning',
+    'LISTO_ENTREGA' => 'primary',
+    'ENTREGADO' => 'success',
+  ];
+  $cls = $map[$estado] ?? 'secondary';
+  return '<span class="badge bg-' . $cls . '">' . e($estado) . '</span>';
 }
 ?>
 <div class="container py-4">
@@ -60,8 +85,75 @@ function badge_severity($disp, $min) {
         </div>
       </div>
     </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="text-muted">Pedidos próximos</div>
+          <div class="display-6"><?= count($pedidosProximos) ?></div>
+          <div class="small text-muted">A entregar en 7 días o menos</div>
+        </div>
+      </div>
+    </div>
     <!-- Podés sumar más KPIs acá -->
   </div>
+
+  <!-- Alertas de pedidos próximos -->
+  <?php if ($pedidosProximos): ?>
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h6 class="mb-3">
+        <i class="bi bi-calendar-event"></i> Pedidos próximos a entregar
+      </h6>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>#</th>
+              <th>Cliente</th>
+              <th>Fecha Entrega</th>
+              <th>Días restantes</th>
+              <th>Estado</th>
+              <th class="text-end">Total</th>
+              <th class="text-end">Saldo</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($pedidosProximos as $p): 
+              $dias = (int)$p['dias_restantes'];
+              $rowClass = '';
+              if ($dias < 0) $rowClass = 'table-danger';
+              elseif ($dias <= 2) $rowClass = 'table-warning';
+            ?>
+              <tr class="<?= $rowClass ?>">
+                <td>#<?= (int)$p['id'] ?></td>
+                <td><?= e($p['cliente']) ?></td>
+                <td><?= e($p['fecha_entrega']) ?></td>
+                <td>
+                  <?php if ($dias < 0): ?>
+                    <span class="badge bg-danger">Vencido hace <?= abs($dias) ?> días</span>
+                  <?php elseif ($dias == 0): ?>
+                    <span class="badge bg-danger">Hoy</span>
+                  <?php elseif ($dias <= 2): ?>
+                    <span class="badge bg-warning text-dark"><?= $dias ?> día<?= $dias>1?'s':'' ?></span>
+                  <?php else: ?>
+                    <span class="badge bg-info"><?= $dias ?> días</span>
+                  <?php endif; ?>
+                </td>
+                <td><?= badge_estado_pedido($p['estado']) ?></td>
+                <td class="text-end"><?= money($p['total_neto']) ?></td>
+                <td class="text-end"><?= money($p['saldo']) ?></td>
+                <td class="text-end">
+                  <a href="<?= url('pedidos.php') ?>?q=<?= (int)$p['id'] ?>" class="btn btn-sm btn-outline-primary">Ver</a>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <div class="card shadow-sm">
     <div class="card-body">
