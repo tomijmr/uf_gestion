@@ -50,7 +50,63 @@ try {
   // Silenciar errores si la tabla ya existe
 }
 
-$validTabs = ['empleados','asistencia','movimientos','resumen','nomina'];
+// Crear tabla para períodos de pago
+try {
+  db()->exec("CREATE TABLE IF NOT EXISTS payroll_periods (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    fecha_inicio DATE NOT NULL,
+    fecha_fin DATE NOT NULL,
+    estado VARCHAR(20) DEFAULT 'ACTIVO',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP NULL,
+    closed_by INT NULL
+  )");
+  
+  // Agregar columna period_id a employee_payroll si no existe
+  db()->exec("ALTER TABLE employee_payroll ADD COLUMN IF NOT EXISTS period_id INT NULL");
+  
+  // Agregar columna para saldo del período
+  db()->exec("ALTER TABLE employee_payroll ADD COLUMN IF NOT EXISTS saldo_periodo_anterior DECIMAL(12,2) DEFAULT 0");
+  
+} catch (Throwable $e) {
+  // Silenciar errores
+}
+
+// ========== FUNCIONES DE PERÍODOS ==========
+function get_active_period() {
+  $stmt = db()->prepare("SELECT * FROM payroll_periods WHERE estado='ACTIVO' ORDER BY fecha_inicio DESC LIMIT 1");
+  $stmt->execute();
+  return $stmt->fetch();
+}
+
+function create_period_if_needed() {
+  $active = get_active_period();
+  if (!$active) {
+    // Crear período para la semana actual
+    $inicio = date('Y-m-d', strtotime('monday this week'));
+    $fin = date('Y-m-d', strtotime('sunday this week'));
+    db()->prepare("INSERT INTO payroll_periods (fecha_inicio, fecha_fin, estado) VALUES (?, ?, 'ACTIVO')")
+      ->execute([$inicio, $fin]);
+    return get_active_period();
+  }
+  return $active;
+}
+
+function get_employee_period_balance($employee_id, $period_id) {
+  // Obtener todos los pagos del período actual
+  $stmt = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as pagado FROM employee_payroll WHERE employee_id=? AND period_id=?");
+  $stmt->execute([$employee_id, $period_id]);
+  $pagado = (float)($stmt->fetch()['pagado'] ?? 0);
+  
+  // Obtener el saldo del período anterior (solo del primer registro del período)
+  $stmt = db()->prepare("SELECT saldo_periodo_anterior FROM employee_payroll WHERE employee_id=? AND period_id=? ORDER BY id ASC LIMIT 1");
+  $stmt->execute([$employee_id, $period_id]);
+  $saldo_anterior = (float)($stmt->fetch()['saldo_periodo_anterior'] ?? 0);
+  
+  return ['pagado' => $pagado, 'saldo_anterior' => $saldo_anterior];
+}
+
+$validTabs = ['empleados','asistencia','movimientos','resumen','nomina','periodos'];
 $tab = $_GET['tab'] ?? 'empleados';
 if (!in_array($tab, $validTabs, true)) $tab = 'empleados';
 
@@ -60,9 +116,81 @@ $selected_emp_id = (int)($_GET['emp_id'] ?? 0);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $action = $_POST['action'] ?? '';
 
+  // CERRAR PERÍODO Y CREAR NUEVO
+  if ($action === 'cerrar_periodo') {
+    try {
+      $period = get_active_period();
+      if (!$period) throw new Exception('No hay un período activo.');
+      
+      $userId = (int)(user()['id'] ?? 0);
+      
+      db()->beginTransaction();
+      
+      // Cerrar el período actual
+      db()->prepare("UPDATE payroll_periods SET estado='CERRADO', closed_at=NOW(), closed_by=? WHERE id=?")
+        ->execute([$userId, $period['id']]);
+      
+      // Calcular y transferir saldos pendientes de cada empleado al nuevo período
+      $employees = db()->query("SELECT id, pago_semanal, pago_por_hora FROM employees WHERE activo=1")->fetchAll();
+      
+      foreach ($employees as $emp) {
+        $emp_id = (int)$emp['id'];
+        
+        // Calcular lo que debía cobrar en el período
+        $sueldo_base = (float)($emp['pago_semanal'] ?? 0);
+        
+        // Horas extras del período
+        $he_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) as total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+        $he_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+        $horas_extras = (float)($he_stmt->fetch()['total'] ?? 0);
+        $pago_horas_extras = $horas_extras * (float)($emp['pago_por_hora'] ?? 0);
+        
+        // Descuentos del período
+        $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) as total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+        // Descuentos del período
+        $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) as total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+        $desc_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+        $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
+        
+        // Total a pagar en el período (base + extras - descuentos)
+        $total_periodo = $sueldo_base + $pago_horas_extras - $descuentos;
+        
+        // Total pagado en el período
+        $pagado_stmt = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
+        $pagado_stmt->execute([$emp_id, $period['id']]);
+        $pagado = (float)($pagado_stmt->fetch()['total'] ?? 0);
+        
+        // Obtener el saldo del período anterior (que estaba guardado antes de iniciar este período)
+        $saldo_anterior_stmt = db()->prepare("SELECT COALESCE(saldo_pendiente, 0) as saldo FROM employees WHERE id=?");
+        $saldo_anterior_stmt->execute([$emp_id]);
+        $saldo_anterior = (float)($saldo_anterior_stmt->fetch()['saldo'] ?? 0);
+        
+        // Calcular el nuevo saldo: lo que debía (total_periodo) + saldo anterior - lo pagado
+        $nuevo_saldo = round($total_periodo + $saldo_anterior - $pagado, 2);
+        
+        // Actualizar el saldo_pendiente del empleado para el nuevo período
+        db()->prepare("UPDATE employees SET saldo_pendiente=? WHERE id=?")
+          ->execute([$nuevo_saldo, $emp_id]);
+      }
+      
+      // Crear nuevo período (próxima semana)
+      $nuevo_inicio = date('Y-m-d', strtotime($period['fecha_fin'] . ' +1 day'));
+      $nuevo_fin = date('Y-m-d', strtotime($nuevo_inicio . ' +6 days'));
+      db()->prepare("INSERT INTO payroll_periods (fecha_inicio, fecha_fin, estado) VALUES (?, ?, 'ACTIVO')")
+        ->execute([$nuevo_inicio, $nuevo_fin]);
+      
+      db()->commit();
+      $flash_ok = "Período cerrado correctamente. Nuevo período creado del $nuevo_inicio al $nuevo_fin.";
+      $tab = 'periodos';
+    } catch (Throwable $e) {
+      db()->rollBack();
+      $flash_err = 'Error: ' . $e->getMessage();
+    }
+  }
+
   // CREAR/EDITAR EMPLEADO
   if ($action === 'guardar_empleado') {
-    $emp_id = (int)($_POST['employee_id'] ?? '');
+    $emp_id = (int)($_POST['employee_id'] ?? 0);
     $nombre = trim($_POST['nombre'] ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $telefono = trim($_POST['telefono'] ?? '');
@@ -251,28 +379,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($fecha_pago === '') throw new Exception('Selecciona fecha de pago.');
       if ($sueldo_neto <= 0) throw new Exception('Sueldo neto debe ser mayor a 0.');
 
-      // Calcular lo que correspondería pagar esta semana (incluye saldo pendiente previo)
-      $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
-      $stmt->execute([$emp_id]);
-      $saldo_prev = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
+      // Obtener o crear el período activo
+      $period = create_period_if_needed();
+      
+      // Calcular cuánto se debe EN ESTE PERÍODO (sin incluir saldo anterior)
+      $owed_this_period = $sueldo_base - $descuentos - $adelantos - $prestamos_cuota;
+      
+      // Calcular cuánto se ha pagado en total en este período
+      $stmt = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
+      $stmt->execute([$emp_id, $period['id']]);
+      $total_pagado_periodo = (float)($stmt->fetch()['total'] ?? 0);
+      
+      // Saldo del período actual = lo que debe este período - lo pagado hasta ahora - el pago actual
+      $saldo_periodo_actual = round($owed_this_period - $total_pagado_periodo - $sueldo_neto, 2);
 
-      $owed = $sueldo_base - $descuentos - $adelantos - $prestamos_cuota + $saldo_prev;
-      // Si se paga menos, queda pendiente
-      $remaining = round($owed - $sueldo_neto, 2);
+      $estado = $saldo_periodo_actual > 0 ? 'PENDIENTE' : 'PAGADO';
 
-      $estado = $remaining > 0 ? 'PENDIENTE' : 'PAGADO';
+      $stmt = db()->prepare("INSERT INTO employee_payroll (employee_id, period_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      $stmt->execute([$emp_id, $period['id'], $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $estado, $notas]);
 
-      $stmt = db()->prepare("INSERT INTO employee_payroll (employee_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      $stmt->execute([$emp_id, $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $estado, $notas]);
-
-      // Actualizar saldo pendiente en empleados: si remaining > 0, quedó sin pagar; si remaining <= 0, se cubrió
-      if ($remaining > 0) {
-        // Queda monto sin pagar
-        db()->prepare("UPDATE employees SET saldo_pendiente = ? WHERE id = ?")->execute([$remaining, $emp_id]);
-      } else {
-        // Se pagó todo o de más: saldo pendiente = 0
-        db()->prepare("UPDATE employees SET saldo_pendiente = 0 WHERE id = ?")->execute([$emp_id]);
-      }
+      // NO actualizar saldo_pendiente aquí - se calcula dinámicamente en la vista
+      // El saldo_pendiente se actualiza SOLO al cerrar el período
 
       // Marcar adelantos como descontados sólo si el pago cubre los adelantos registrados
       if ($sueldo_neto >= $adelantos) {
@@ -393,12 +520,24 @@ if ($selected_employee) {
     $prestamos_stmt->execute([$selected_emp_id]);
     $prestamos_total = (float)($prestamos_stmt->fetch()['total'] ?? 0);
     
-    // Incluir saldo pendiente acumulado (carryover)
-    $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
-    $stmt->execute([$selected_emp_id]);
-    $saldo_prev_emp = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
-
-    $saldo_semanal = $sueldo_base + $pago_horas_extras - $descuentos_total - $adelantos_total - $prestamos_total + $saldo_prev_emp;
+    // Obtener saldo del período anterior (transferido)
+    $stmt_saldo = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
+    $stmt_saldo->execute([$selected_emp_id]);
+    $saldo_periodo_anterior = (float)($stmt_saldo->fetch()['saldo_pendiente'] ?? 0);
+    
+    // El saldo semanal = base + extras + saldo anterior - descuentos - adelantos - préstamos - pagos
+    $debe_este_periodo = $sueldo_base + $pago_horas_extras - $descuentos_total - $adelantos_total - $prestamos_total;
+    
+    // Obtener pagos del período actual
+    $period = get_active_period();
+    $pagos_periodo_actual = 0;
+    if ($period) {
+      $stmt_pagos = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
+      $stmt_pagos->execute([$selected_emp_id, $period['id']]);
+      $pagos_periodo_actual = (float)($stmt_pagos->fetch()['total'] ?? 0);
+    }
+    
+    $saldo_semanal = round($debe_este_periodo + $saldo_periodo_anterior - $pagos_periodo_actual, 2);
   } catch (Throwable $e) {}
 }
 
@@ -454,15 +593,35 @@ try {
   error_log("Error cargando resumen: " . $e->getMessage());
 }
 
-// Calcular saldos
+// Calcular saldos del período actual (incluyendo saldo anterior si fue transferido)
 foreach ($resumen_empleados as &$emp) {
-  // Incluir saldo pendiente por empleado
   try {
-    $stmt = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
-    $stmt->execute([(int)$emp['id']]);
-    $pending = (float)($stmt->fetch()['saldo_pendiente'] ?? 0);
-  } catch (Throwable $e) { $pending = 0; }
-  $emp['saldo'] = $emp['sueldo_base_semanal'] + $emp['pago_horas_extras'] - ($emp['descuentos'] + $emp['adelantos'] + $emp['cuota_prestamo']) + $pending;
+    $period = get_active_period();
+    
+    // Obtener saldo del período anterior (transferido al crear el período)
+    $stmt_saldo = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
+    $stmt_saldo->execute([(int)$emp['id']]);
+    $saldo_periodo_anterior = (float)($stmt_saldo->fetch()['saldo_pendiente'] ?? 0);
+    
+    // Lo que debe este período (base + extras - descuentos - adelantos - préstamos)
+    $debe_periodo = $emp['sueldo_base_semanal'] + $emp['pago_horas_extras'] - ($emp['descuentos'] + $emp['adelantos'] + $emp['cuota_prestamo']);
+    
+    // Lo pagado en este período
+    $pagos_periodo = 0;
+    if ($period) {
+      $stmt_pagos = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
+      $stmt_pagos->execute([(int)$emp['id'], $period['id']]);
+      $pagos_periodo = (float)($stmt_pagos->fetch()['total'] ?? 0);
+    }
+    
+    // Saldo total = lo que debe este período + saldo anterior - lo pagado
+    // El saldo anterior YA está incluido en saldo_pendiente cuando se transfiere el período
+    // Por lo tanto: saldo final = sueldo_base + horas_extras - descuentos - adelantos - prestamos + saldo_anterior - pagado
+    $emp['saldo'] = round($debe_periodo + $saldo_periodo_anterior - $pagos_periodo, 2);
+  } catch (Throwable $e) { 
+    error_log("Error calculando saldo: " . $e->getMessage());
+    $emp['saldo'] = 0; 
+  }
 }
 unset($emp); // Romper referencia para evitar corrupción en loops siguientes
 
@@ -525,6 +684,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     <li class="nav-item"><button class="nav-link <?= tabActive('movimientos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#movimientos" type="button">Legajo</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('resumen',$tab) ?>" data-bs-toggle="tab" data-bs-target="#resumen" type="button">Resumen de Sueldos</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('nomina',$tab) ?>" data-bs-toggle="tab" data-bs-target="#nomina" type="button">Nómina</button></li>
+    <li class="nav-item"><button class="nav-link <?= tabActive('periodos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#periodos" type="button">Períodos</button></li>
   </ul>
 
   <div class="tab-content border-bottom border-start border-end p-3 bg-white shadow-sm">
@@ -1018,5 +1178,72 @@ include __DIR__ . '/../views/partials/navbar.php';
     }
   });
 </script>
+
+    <!-- PERÍODOS -->
+    <div class="tab-pane fade <?= paneActive('periodos',$tab) ?>" id="periodos">
+      <h6>Gestión de Períodos de Pago</h6>
+      
+      <?php 
+      $current_period = get_active_period();
+      $all_periods = db()->query("SELECT * FROM payroll_periods ORDER BY fecha_inicio DESC LIMIT 20")->fetchAll();
+      ?>
+      
+      <?php if ($current_period): ?>
+        <div class="alert alert-info">
+          <strong>Período Actual (ACTIVO):</strong> 
+          <?= e($current_period['fecha_inicio']) ?> al <?= e($current_period['fecha_fin']) ?>
+          <form method="post" class="d-inline float-end" onsubmit="return confirm('¿Está seguro de cerrar el período actual? Esto calculará los saldos pendientes y creará un nuevo período.');">
+            <input type="hidden" name="action" value="cerrar_periodo">
+            <button type="submit" class="btn btn-sm btn-danger">Cerrar Período y Crear Nuevo</button>
+          </form>
+        </div>
+      <?php else: ?>
+        <div class="alert alert-warning">
+          No hay un período activo. Se creará automáticamente al registrar un pago.
+        </div>
+      <?php endif; ?>
+
+      <div class="card mt-3">
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>ID</th>
+                <th>Fecha Inicio</th>
+                <th>Fecha Fin</th>
+                <th>Estado</th>
+                <th>Fecha Cierre</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php if (!$all_periods): ?>
+                <tr><td colspan="5" class="text-center text-muted py-3">No hay períodos registrados</td></tr>
+              <?php else: foreach ($all_periods as $p): ?>
+                <tr>
+                  <td><?= (int)$p['id'] ?></td>
+                  <td><?= e($p['fecha_inicio']) ?></td>
+                  <td><?= e($p['fecha_fin']) ?></td>
+                  <td><span class="badge bg-<?= $p['estado'] === 'ACTIVO' ? 'success' : 'secondary' ?>"><?= e($p['estado']) ?></span></td>
+                  <td><?= $p['closed_at'] ? e($p['closed_at']) : '—' ?></td>
+                </tr>
+              <?php endforeach; endif; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="alert alert-secondary mt-3 small">
+        <strong>Cómo funcionan los períodos:</strong>
+        <ul class="mb-0">
+          <li>Cada semana es un período independiente de pago</li>
+          <li>Los pagos dentro del mismo período no duplican saldos</li>
+          <li>Al cerrar un período, los saldos pendientes se transfieren al siguiente</li>
+          <li>Un período debe cerrarse antes de que los saldos pasen a la próxima semana</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>
