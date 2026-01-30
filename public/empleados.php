@@ -1080,6 +1080,17 @@ include __DIR__ . '/../views/partials/navbar.php';
               </tr>
             <?php endforeach; endif; ?>
           </tbody>
+          <?php if ($resumen_empleados): 
+            $total_saldo = array_sum(array_column($resumen_empleados, 'saldo'));
+          ?>
+          <tfoot class="table-light fw-bold">
+            <tr>
+              <td colspan="8">TOTAL A PAGAR</td>
+              <td class="text-end" style="color: <?= $total_saldo >= 0 ? 'green' : 'red' ?>"><?= money($total_saldo) ?></td>
+              <td></td>
+            </tr>
+          </tfoot>
+          <?php endif; ?>
         </table>
       </div>
 
