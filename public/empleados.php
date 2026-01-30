@@ -4,6 +4,9 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Determinar si es rol RRHH (solo ve asistencias e incidencias)
+$is_rrhh_only = check_role('RRHH') && !check_role('ADMIN', 'CAJA');
+
 $flash_ok = '';
 $flash_err = '';
 
@@ -108,6 +111,13 @@ function get_employee_period_balance($employee_id, $period_id) {
 
 $validTabs = ['empleados','asistencia','movimientos','resumen','nomina','periodos'];
 $tab = $_GET['tab'] ?? 'empleados';
+
+// Si es RRHH, solo permitir asistencia e incidencias (movimientos)
+if ($is_rrhh_only) {
+  $validTabs = ['asistencia', 'movimientos'];
+  $tab = in_array($tab, $validTabs, true) ? $tab : 'asistencia';
+}
+
 if (!in_array($tab, $validTabs, true)) $tab = 'empleados';
 
 $selected_emp_id = (int)($_GET['emp_id'] ?? 0);
@@ -679,12 +689,16 @@ include __DIR__ . '/../views/partials/navbar.php';
   <?php endif; ?>
 
   <ul class="nav nav-tabs" role="tablist">
+    <?php if (!$is_rrhh_only): ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('empleados',$tab) ?>" data-bs-toggle="tab" data-bs-target="#empleados" type="button">Empleados</button></li>
+    <?php endif; ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('asistencia',$tab) ?>" data-bs-toggle="tab" data-bs-target="#asistencia" type="button">Asistencia</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('movimientos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#movimientos" type="button">Legajo</button></li>
+    <?php if (!$is_rrhh_only): ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('resumen',$tab) ?>" data-bs-toggle="tab" data-bs-target="#resumen" type="button">Resumen de Sueldos</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('nomina',$tab) ?>" data-bs-toggle="tab" data-bs-target="#nomina" type="button">Nómina</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('periodos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#periodos" type="button">Períodos</button></li>
+    <?php endif; ?>
   </ul>
 
   <div class="tab-content border-bottom border-start border-end p-3 bg-white shadow-sm">

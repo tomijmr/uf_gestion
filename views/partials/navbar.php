@@ -25,7 +25,7 @@ $MENU = [
   ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO']],
   ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA']],
   ['label' => 'Caja',                'href' => url('caja.php'),                 'roles' => ['ADMIN','CAJA']],
-  ['label' => 'Empleados',                'href' => url('empleados.php'),                 'roles' => ['ADMIN','CAJA']],
+  ['label' => 'Empleados',           'href' => url('empleados.php'),            'roles' => ['ADMIN','CAJA','RRHH']],
 ];
 
 // Note: Se ha cambiado el nombre del item de menú de 'Productos' a 'Materias Primas' y se agregó 'Productos Terminados'.
