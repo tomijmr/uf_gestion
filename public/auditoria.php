@@ -140,7 +140,7 @@ $sqlTopClientes = "
     AND o.estado <> 'BORRADOR'
   GROUP BY c.id, c.nombre
   ORDER BY total_vendido DESC
-  LIMIT 5
+  LIMIT 10
 ";
 $stTC = db()->prepare($sqlTopClientes);
 $stTC->execute([':desde' => $desde, ':hasta' => $hasta]);
