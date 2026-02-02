@@ -426,6 +426,7 @@ if ($step === 2):
       <div class="col-md-4 text-muted d-flex align-items-center">
         <small>Tip: si no buscás nada, se muestran los primeros 30 productos terminados.</small>
       </div>
+      <small>AVISO: Todos los precios son SIN IVA. En caso de necesitarlo al cliente sumarle +21%</small>
     </form>
 
     <?php if (!empty($error)): ?>
