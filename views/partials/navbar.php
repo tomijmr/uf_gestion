@@ -16,11 +16,11 @@ function can(...$roles): bool {
 /** Definición de menú por roles (fácil de ajustar) */
 $MENU = [
   ['label' => 'Dashboard',           'href' => url('dashboard.php'),            'roles' => ['*']], // * = todos logueados
-  ['label' => 'Clientes',            'href' => url('clientes.php'),             'roles' => ['ADMIN','VENTAS','LECTURA']],
-  ['label' => 'Pedidos',             'href' => url('pedidos.php'),              'roles' => ['ADMIN','VENTAS']],
+  ['label' => 'Clientes',            'href' => url('clientes.php'),             'roles' => ['ADMIN','VENTAS','LECTURA','RRHH']],
+  ['label' => 'Pedidos',             'href' => url('pedidos.php'),              'roles' => ['ADMIN','VENTAS','RRHH']],
   // Menú de Inventario dividido:
-  ['label' => 'Materias Primas',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA']],
-  ['label' => 'Maquinas', 'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA']],
+  ['label' => 'Materias Primas',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
+  ['label' => 'Maquinas',            'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO']],
   ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO']],
   ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA']],
