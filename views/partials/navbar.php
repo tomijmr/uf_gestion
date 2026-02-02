@@ -21,8 +21,8 @@ $MENU = [
   // Menú de Inventario dividido:
   ['label' => 'Materias Primas',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Maquinas',            'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
-  ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO']],
-  ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO']],
+  ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO','RRHH']],
+  ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
   ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA']],
   ['label' => 'Caja',                'href' => url('caja.php'),                 'roles' => ['ADMIN','CAJA']],
   ['label' => 'Empleados',           'href' => url('empleados.php'),            'roles' => ['ADMIN','CAJA','RRHH']],
