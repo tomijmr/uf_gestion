@@ -284,6 +284,8 @@ $off   = ($page - 1) * $limit;
 $sqlCount = "SELECT COUNT(*) total
              FROM production_orders po
              JOIN products p ON p.id=po.product_pt_id
+             LEFT JOIN orders o ON o.id=po.order_id
+             LEFT JOIN clientes c ON c.id=o.cliente_id
              $whereSql";
 $st = db()->prepare($sqlCount);
 $st->execute($params);
