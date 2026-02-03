@@ -27,6 +27,8 @@ function refresh_pt_price(int $pt_id): void {
   $s->execute([$pt_id]);
   $margen = (float)($s->fetchColumn() ?? 0);
   $costo = bom_cost_pt($pt_id);
+  // Si no hay costo de BOM (BOM vacío), no actualizar el precio - preservar precio manual
+  if ($costo <= 0) return;
   $precio = round($costo * (1 + ($margen/100)), 2);
   $u = db()->prepare("UPDATE products SET precio_std=? WHERE id=? AND tipo='PT'");
   $u->execute([$precio, $pt_id]);
@@ -50,8 +52,9 @@ function update_all_pt_prices(): void {
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 
-// Ejecutar la actualización de precios antes de listar los productos
-update_all_pt_prices();
+// Actualización de precios de PT: SOLO se ejecuta cuando se modifica una MP o BOM
+// NO ejecutar automáticamente al cargar la página (causaba que PT sin BOM se pusiera a precio 0)
+// update_all_pt_prices();
 
 // --------- Acciones rápidas ----------
 $flash_ok = '';
@@ -99,10 +102,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std, $precio_std, $stock_minimo]);
       
       $last_id = (int)db()->lastInsertId();
-      if ($tipo === 'PT') {
-          // Si creamos un PT, refrescamos su precio inicial (aunque sea 0 sin BOM)
-          refresh_pt_price($last_id);
-      }
+      // No refrescar precio de nuevo PT - se deja con el precio ingresado
+      // refresh_pt_price() solo se ejecuta cuando se modifica el BOM
 
       $flash_ok = "Producto creado correctamente.";
     } catch (Throwable $e) {

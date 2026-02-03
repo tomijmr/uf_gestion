@@ -28,7 +28,7 @@ function refresh_pt_price(int $pt_id): void {
   $s->execute([$pt_id]);
   $margen = (float)($s->fetchColumn() ?? 0);
   $costo = bom_cost($pt_id);
-  // No sobrescribimos el precio si el costo BOM es 0 (preservar precio manual)
+  // Si no hay costo de BOM (BOM vacío), no actualizar el precio - preservar precio manual
   if ($costo <= 0) return;
   $precio = round($costo * (1 + ($margen/100)), 2);
   $u = db()->prepare("UPDATE products SET precio_std=? WHERE id=? AND tipo='PT'");
@@ -77,12 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $params[] = $id;
 
         db()->prepare($sql)->execute($params);
-        // fin corrección
 
-        if ($tipo === 'PT') {
-          // Si el producto que editamos es PT, refrescamos su precio de venta
-          refresh_pt_price($id); 
-        }
+        // No refrescar precio automáticamente al editar PT
+        // El precio se actualiza manualmente desde el formulario
+        // refresh_pt_price() solo se ejecuta cuando se modifica el BOM
       } else {
         // Lógica de inserción (Alta de Producto Nuevo)
         $costo_std_insert = ($tipo === 'MP') ? $costo_std : 0; // Usar costo_std enviado si es MP
@@ -94,18 +92,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo]);
         $id = (int)db()->lastInsertId();
 
-        if ($tipo === 'PT') {
-          refresh_pt_price($id);
-        }
+        // No refrescar precio al crear nuevo PT - se deja con el precio ingresado
+        // refresh_pt_price() solo se ejecuta cuando se modifica el BOM
       }
       
       // Si actualizamos una MP, necesitamos refrescar los precios de TODOS los PT que la usan.
       if ($tipo === 'MP') {
-        // En lugar de actualizar todos los PT (como en productos.php), solo actualizamos los dependientes.
-        $dependent_pt_ids = db()->query("SELECT product_pt_id FROM product_bom WHERE component_id = $id")->fetchAll(PDO::FETCH_COLUMN);
-        foreach ($dependent_pt_ids as $pt_id) {
-            refresh_pt_price((int)$pt_id);
-        }
+        // DESHABILITADO: En lugar de actualizar todos los PT (como en productos.php), solo actualizamos los dependientes.
+        // El precio de los PT ahora es 100% manual, no se actualiza automáticamente según el BOM.
+        // $dependent_pt_ids = db()->query("SELECT product_pt_id FROM product_bom WHERE component_id = $id")->fetchAll(PDO::FETCH_COLUMN);
+        // foreach ($dependent_pt_ids as $pt_id) {
+        //     refresh_pt_price((int)$pt_id);
+        // }
       }
       
       $flash_ok = 'Producto guardado correctamente.';
@@ -143,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->execute([$id, $component_id, $cant]);
       }
 
-      refresh_pt_price($id);
+      // DESHABILITADO: refresh_pt_price($id); - El precio de PT ahora es 100% manual
       $flash_ok = 'Componente agregado a la BOM.';
     } catch (Throwable $e) {
       $flash_err = 'No se pudo agregar: ' . $e->getMessage();
@@ -158,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $component_id = (int)$_POST['bom_remove_id'];
       db()->prepare("DELETE FROM product_bom WHERE product_pt_id=? AND component_id=?")->execute([$id, $component_id]);
 
-      refresh_pt_price($id);
+      // DESHABILITADO: refresh_pt_price($id); - El precio de PT ahora es 100% manual
       $flash_ok = 'Componente eliminado.';
     } catch (Throwable $e) {
       $flash_err = 'No se pudo eliminar: ' . $e->getMessage();
@@ -178,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->execute([$v, $id, $cid]);
       }
 
-      refresh_pt_price($id);
+      // DESHABILITADO: refresh_pt_price($id); - El precio de PT ahora es 100% manual
       $flash_ok = 'BOM actualizada.';
     } catch (Throwable $e) {
       $flash_err = 'No se pudo actualizar: ' . $e->getMessage();
@@ -193,8 +191,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $m = max(0, (float)($_POST['margen_pct'] ?? 0));
       db()->prepare("UPDATE products SET margen_pct=? WHERE id=?")->execute([$m, $id]);
 
-      refresh_pt_price($id);
-      $flash_ok = 'Margen actualizado y precio recalculado.';
+      // DESHABILITADO: refresh_pt_price($id); - El precio de PT ahora es 100% manual
+      $flash_ok = 'Margen actualizado.';
     } catch (Throwable $e) {
       $flash_err = 'No se pudo actualizar el margen: ' . $e->getMessage();
     }
@@ -252,7 +250,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 <div class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0"><?= $id ? 'Editar Producto' : 'Nuevo Producto' ?></h5>
-    <a class="btn btn-outline-secondary" href="<?= url('productos.php') ?>">Volver</a>
+    <a class="btn btn-outline-secondary" href="<?= url('productos_terminados.php') ?>">Volver</a>
   </div>
 
   <?php if ($flash_ok): ?><div class="alert alert-success"><?= e($flash_ok) ?></div><?php endif; ?>
