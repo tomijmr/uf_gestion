@@ -293,7 +293,7 @@ $sqlCount = "SELECT COUNT(*) total
              FROM production_orders po
              JOIN products p ON p.id=po.product_pt_id
              LEFT JOIN orders o ON o.id=po.order_id
-             LEFT JOIN clientes c ON c.id=o.cliente_id
+             LEFT JOIN customers c ON c.id=o.cliente_id
              $whereSql";
 $st = db()->prepare($sqlCount);
 $st->execute($params);
@@ -305,7 +305,7 @@ $sql = "SELECT po.id, po.order_id, po.product_pt_id, po.cantidad, po.estado, po.
         FROM production_orders po
         JOIN products p ON p.id=po.product_pt_id
         LEFT JOIN orders o ON o.id=po.order_id
-        LEFT JOIN clientes c ON c.id=o.cliente_id
+        LEFT JOIN customers c ON c.id=o.cliente_id
         $whereSql
         ORDER BY FIELD(po.estado, 'PENDIENTE','EN_CURSO','FINALIZADA','OBSERVADA'), po.id DESC
         LIMIT $limit OFFSET $off";
