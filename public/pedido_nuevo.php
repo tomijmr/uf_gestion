@@ -26,8 +26,7 @@ if (!isset($_SESSION['pedido'])) {
     'bank_account_id' => null,
     'third_party_name' => '',
     'fecha_entrega' => '',
-    'dias_entrega' => '',
-  ];
+    'dias_entrega' => '',    'incluye_iva' => 1,  ];
 }
 $P =& $_SESSION['pedido'];
 
@@ -157,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $P['third_party_name'] = trim($_POST['third_party_name'] ?? '');
     $P['dias_entrega'] = trim($_POST['dias_entrega'] ?? '');
     $P['fecha_entrega'] = trim($_POST['fecha_entrega'] ?? '');
+    $P['incluye_iva'] = isset($_POST['incluye_iva']) ? 1 : 0;
     
     // Calcular fecha de entrega si se eligió días
     if ($P['dias_entrega'] !== '' && $P['dias_entrega'] !== 'manual') {
@@ -221,14 +221,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $total_neto  = $total_bruto - $descuento;
         $senia       = $P['senia'];
         $saldo       = max(0, $total_neto - $senia);
+        $incluye_iva = $P['incluye_iva'] ?? 1;
 
         // Crear pedido
-        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
         db()->prepare($sqlOrder)->execute([
           $P['customer_id'], date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'CONFIRMADO',
           $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
-          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null
+          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $incluye_iva
         ]);
         $order_id = (int)db()->lastInsertId();
 
@@ -659,6 +660,14 @@ if ($step === 3):
                   <input class="form-check-input" type="checkbox" name="transporte_bonificado" value="1" id="transp_bonif" <?= $P['transporte_bonificado'] ? 'checked' : '' ?>>
                   <label class="form-check-label" for="transp_bonif">
                     Transporte bonificado
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="incluye_iva" value="1" id="incluye_iva" <?= ($P['incluye_iva'] ?? 1) ? 'checked' : '' ?>>
+                  <label class="form-check-label" for="incluye_iva">
+                    Incluir IVA (21%)
                   </label>
                 </div>
               </div>

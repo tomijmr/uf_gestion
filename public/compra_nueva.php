@@ -69,10 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     db()->beginTransaction();
 
     // Insert purchase (total calculado luego)
+    $incluye_iva = isset($_POST['incluye_iva']) ? 1 : 0;
     $insP = db()->prepare("INSERT INTO purchases
-      (fecha, proveedor, comp_tipo, comp_serie, comp_numero, total, moneda, archivo_path, notas, created_by)
-      VALUES (?,?,?,?,?,0,?,?,?,?)");
-    $insP->execute([$fecha, $proveedor, $comp_tipo, $comp_serie, $comp_num, $moneda, $archivo_path, $notas, (int)user()['id']]);
+      (fecha, proveedor, comp_tipo, comp_serie, comp_numero, total, moneda, archivo_path, notas, created_by, incluye_iva)
+      VALUES (?,?,?,?,?,0,?,?,?,?,?)");
+    $insP->execute([$fecha, $proveedor, $comp_tipo, $comp_serie, $comp_num, $moneda, $archivo_path, $notas, (int)user()['id'], $incluye_iva]);
     $purchase_id = (int)db()->lastInsertId();
 
     $total = 0.0;
@@ -214,6 +215,15 @@ include __DIR__ . '/../views/partials/navbar.php';
         <div class="col-md-8">
           <label class="form-label">Notas</label>
           <input class="form-control" name="notas">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">&nbsp;</label>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="incluye_iva" id="incluye_iva" checked>
+            <label class="form-check-label" for="incluye_iva">
+              Incluir IVA (21%)
+            </label>
+          </div>
         </div>
       </div>
 
