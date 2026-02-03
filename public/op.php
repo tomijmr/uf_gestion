@@ -15,6 +15,16 @@ function fetchBom(int $pt_id): array {
   return $s->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function fetchOrderMachines(int $order_id): array {
+  $s = db()->prepare("SELECT oi.id, oi.product_id, oi.cant, p.codigo, p.nombre, p.tipo, p.stock_actual
+                      FROM order_items oi
+                      JOIN products p ON p.id=oi.product_id
+                      WHERE oi.order_id=? AND p.tipo='PT'
+                      ORDER BY p.nombre");
+  $s->execute([$order_id]);
+  return $s->fetchAll(PDO::FETCH_ASSOC);
+}
+
 function reserveForOrdersIfPossible(int $pt_id): void {
   // Heurística MVP: reservar para órdenes EN_PRODUCCION que requieran este PT
   $sOrders = db()->prepare("
@@ -281,9 +291,11 @@ $total = (int)$st->fetchColumn();
 $pages = max(1, (int)ceil($total / $limit));
 
 $sql = "SELECT po.id, po.order_id, po.product_pt_id, po.cantidad, po.estado, po.fecha_ini, po.fecha_fin,
-               p.codigo, p.nombre
+               p.codigo, p.nombre, c.nombre as cliente_nombre
         FROM production_orders po
         JOIN products p ON p.id=po.product_pt_id
+        LEFT JOIN orders o ON o.id=po.order_id
+        LEFT JOIN clientes c ON c.id=o.cliente_id
         $whereSql
         ORDER BY FIELD(po.estado, 'PENDIENTE','EN_CURSO','FINALIZADA','OBSERVADA'), po.id DESC
         LIMIT $limit OFFSET $off";
@@ -344,10 +356,10 @@ include __DIR__ . '/../views/partials/navbar.php';
           <thead class="table-light">
             <tr>
               <th style="width:90px;">#OP</th>
-              <th>Producto PT</th>
+              <th>Máquina</th>
               <th class="text-end">Cant.</th>
               <th class="text-center">Estado</th>
-              <th>Pedido Origen</th>
+              <th>Cliente / Pedido</th>
               <th style="width:330px;" class="text-end">Acciones</th>
             </tr>
           </thead>
@@ -360,7 +372,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               <td><?= e($r['codigo']) ?> — <?= e($r['nombre']) ?></td>
               <td class="text-end"><?= (float)$r['cantidad'] ?></td>
               <td class="text-center"><?= badge_op($r['estado']) ?></td>
-              <td><?= $r['order_id'] ? '#'.(int)$r['order_id'] : '-' ?></td>
+              <td><?= $r['cliente_nombre'] ? e($r['cliente_nombre']) : '-' ?> <br><small class="text-muted"><?= $r['order_id'] ? '#'.(int)$r['order_id'] : '-' ?></small></td>
               <td class="text-end">
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         data-bs-toggle="collapse" data-bs-target="#bom<?= (int)$r['id'] ?>">
@@ -397,25 +409,57 @@ include __DIR__ . '/../views/partials/navbar.php';
             <tr class="collapse" id="bom<?= (int)$r['id'] ?>">
               <td colspan="6" class="bg-light">
                 <div class="p-3">
-                  <div class="fw-semibold mb-2">BOM (x <?= (float)$r['cantidad'] ?>)</div>
-                  <?php $bom = fetchBom((int)$r['product_pt_id']); ?>
-                  <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                      <thead><tr><th>Código</th><th>Nombre</th><th>Unidad</th><th class="text-end">Por unidad</th><th class="text-end">Necesario</th><th class="text-end">Stock</th></tr></thead>
-                      <tbody>
-                        <?php foreach ($bom as $b): 
-                          $need = (float)$b['cant_por_unidad'] * (float)$r['cantidad']; ?>
-                          <tr>
-                            <td><?= e($b['codigo']) ?></td>
-                            <td><?= e($b['nombre']) ?></td>
-                            <td><?= e($b['unidad']) ?></td>
-                            <td class="text-end"><?= (float)$b['cant_por_unidad'] ?></td>
-                            <td class="text-end"><?= $need ?></td>
-                            <td class="text-end"><?= (float)$b['stock_actual'] ?></td>
-                          </tr>
-                        <?php endforeach; ?>
-                      </tbody>
-                    </table>
+                  <div class="row">
+                    <!-- Máquinas del Pedido -->
+                    <div class="col-md-6">
+                      <div class="fw-semibold mb-2">Máquinas en el Pedido</div>
+                      <?php $machines = $r['order_id'] ? fetchOrderMachines((int)$r['order_id']) : []; ?>
+                      <?php if ($machines): ?>
+                        <div class="table-responsive">
+                          <table class="table table-sm mb-0">
+                            <thead><tr><th>Código</th><th>Máquina</th><th class="text-end">Cant.</th><th class="text-end">Stock</th></tr></thead>
+                            <tbody>
+                              <?php foreach ($machines as $m): ?>
+                                <tr>
+                                  <td><?= e($m['codigo']) ?></td>
+                                  <td><?= e($m['nombre']) ?></td>
+                                  <td class="text-end"><?= (float)$m['cant'] ?></td>
+                                  <td class="text-end"><span class="badge bg-<?= (float)$m['stock_actual'] >= (float)$m['cant'] ? 'success' : 'warning' ?>"><?= (float)$m['stock_actual'] ?></span></td>
+                                </tr>
+                              <?php endforeach; ?>
+                            </tbody>
+                          </table>
+                        </div>
+                      <?php else: ?>
+                        <div class="text-muted small">Sin máquinas en este pedido.</div>
+                      <?php endif; ?>
+                    </div>
+
+                    <!-- Componentes (BOM) de esta máquina -->
+                    <div class="col-md-6">
+                      <div class="fw-semibold mb-2">Componentes de esta máquina (x <?= (float)$r['cantidad'] ?>)</div>
+                      <?php $bom = fetchBom((int)$r['product_pt_id']); ?>
+                      <?php if ($bom): ?>
+                        <div class="table-responsive">
+                          <table class="table table-sm mb-0">
+                            <thead><tr><th>Código</th><th>Componente</th><th class="text-end">Nec.</th><th class="text-end">Stock</th></tr></thead>
+                            <tbody>
+                              <?php foreach ($bom as $b): 
+                                $need = (float)$b['cant_por_unidad'] * (float)$r['cantidad']; ?>
+                                <tr>
+                                  <td><?= e($b['codigo']) ?></td>
+                                  <td><?= e($b['nombre']) ?></td>
+                                  <td class="text-end"><?= $need ?></td>
+                                  <td class="text-end"><span class="badge bg-<?= (float)$b['stock_actual'] >= $need ? 'success' : 'danger' ?>"><?= (float)$b['stock_actual'] ?></span></td>
+                                </tr>
+                              <?php endforeach; ?>
+                            </tbody>
+                          </table>
+                        </div>
+                      <?php else: ?>
+                        <div class="text-muted small">Sin componentes en la BOM.</div>
+                      <?php endif; ?>
+                    </div>
                   </div>
                 </div>
               </td>
