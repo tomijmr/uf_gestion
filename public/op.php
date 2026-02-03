@@ -4,6 +4,14 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Source - https://stackoverflow.com/q/1053424
+// Posted by Abs, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-02-03, License - CC BY-SA 4.0
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+
 // ---------- Utilidades ----------
 function fetchBom(int $pt_id): array {
   $s = db()->prepare("SELECT b.id AS bom_id, b.component_id, p.codigo, p.nombre, p.unidad, b.cant_por_unidad,
