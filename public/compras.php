@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../app/auth.php';
 require_login();
-require_role('ADMIN','DEPOSITO');
+require_role('ADMIN','DEPOSITO','RRHH');
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
