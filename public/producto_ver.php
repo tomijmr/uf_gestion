@@ -4,6 +4,26 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// AJAX: Búsqueda de componentes MP
+if ($_GET['_ajax_search_component'] ?? false) {
+  header('Content-Type: application/json');
+  $q = trim($_GET['q'] ?? '');
+  if (strlen($q) < 2) {
+    echo json_encode([]);
+    exit;
+  }
+  $s = db()->prepare("SELECT id, codigo, nombre FROM products WHERE tipo='MP' AND activo=1 AND (codigo LIKE ? OR nombre LIKE ?) ORDER BY nombre LIMIT 20");
+  $s->execute(["%$q%", "%$q%"]);
+  $rows = $s->fetchAll(PDO::FETCH_ASSOC);
+  echo json_encode(array_map(fn($r) => [
+    'id' => (int)$r['id'],
+    'label' => e($r['codigo']) . ' — ' . e($r['nombre']),
+    'codigo' => $r['codigo'],
+    'nombre' => $r['nombre']
+  ], $rows));
+  exit;
+}
+
 $flash_ok = '';
 $flash_err = '';
 
@@ -374,20 +394,70 @@ include __DIR__ . '/../views/partials/navbar.php';
       <form class="row g-2 mb-3" method="post">
         <input type="hidden" name="action" value="bom_add">
         <div class="col-md-6">
-          <select name="component_id" class="form-select" required>
-            <option value="">— Seleccionar MP activo —</option>
-            <?php foreach ($componentesSel as $c): ?>
-              <option value="<?= (int)$c['id'] ?>"><?= e($c['codigo'].' — '.$c['nombre']) ?></option>
-            <?php endforeach; ?>
-          </select>
+          <div class="position-relative">
+            <input type="text" id="component_search" class="form-control" placeholder="Buscar componente (código o nombre)..." autocomplete="off">
+            <input type="hidden" name="component_id" id="component_id" required>
+            <div id="component_suggestions" class="list-group position-absolute w-100" style="display:none; z-index:1000; max-height:300px; overflow-y:auto;"></div>
+          </div>
+          <small class="text-muted d-block mt-1" id="selected_component"></small>
         </div>
         <div class="col-md-3">
           <input name="cant_por_unidad" type="number" step="0.0001" min="0.0001" class="form-control" placeholder="Cant. por unidad" required>
         </div>
         <div class="col-md-3 d-grid">
-          <button class="btn btn-outline-primary">Agregar componente</button>
+          <button class="btn btn-outline-primary" type="submit">Agregar componente</button>
         </div>
       </form>
+
+      <script>
+        const componentSearch = document.getElementById('component_search');
+        const componentId = document.getElementById('component_id');
+        const suggestions = document.getElementById('component_suggestions');
+        const selectedComp = document.getElementById('selected_component');
+        let searchTimeout;
+
+        componentSearch.addEventListener('input', () => {
+          clearTimeout(searchTimeout);
+          const q = componentSearch.value.trim();
+          
+          if (q.length < 2) {
+            suggestions.style.display = 'none';
+            componentId.value = '';
+            selectedComp.textContent = '';
+            return;
+          }
+
+          searchTimeout = setTimeout(() => {
+            fetch('<?= url('producto_ver.php') ?>?_ajax_search_component=1&q=' + encodeURIComponent(q))
+              .then(r => r.json())
+              .then(data => {
+                suggestions.innerHTML = data.map(item => 
+                  `<button type="button" class="list-group-item list-group-item-action" data-id="${item.id}" data-label="${item.label}">
+                    <strong>${item.codigo}</strong> — ${item.nombre}
+                  </button>`
+                ).join('');
+                
+                if (data.length > 0) suggestions.style.display = 'block';
+                
+                document.querySelectorAll('#component_suggestions button').forEach(btn => {
+                  btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    componentId.value = btn.dataset.id;
+                    componentSearch.value = btn.dataset.label;
+                    selectedComp.textContent = '✓ ' + btn.dataset.label;
+                    suggestions.style.display = 'none';
+                  });
+                });
+              });
+          }, 300);
+        });
+
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('#component_search') && !e.target.closest('#component_suggestions')) {
+            suggestions.style.display = 'none';
+          }
+        });
+      </script>
 
       <form method="post">
         <input type="hidden" name="action" value="bom_update">
