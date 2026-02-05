@@ -6,6 +6,25 @@ require_once __DIR__ . '/../app/helpers.php';
 
 // Exportar presupuesto en HTML (para imprimir a PDF)
 if (isset($_GET['export_presupuesto'])) {
+  if (!isset($_SESSION['pedido'])) {
+    $_SESSION['pedido'] = [
+      'customer_id' => null,
+      'items' => [],
+      'senia' => 0.0,
+      'medio' => 'EFECTIVO',
+      'observaciones' => '',
+      'transporte_bonificado' => 0,
+      'empresa_transporte' => '',
+      'voucher_path' => null,
+      'bank_account_id' => null,
+      'third_party_name' => '',
+      'fecha_entrega' => '',
+      'dias_entrega' => '',
+      'incluye_iva' => 1,
+    ];
+  }
+  $P =& $_SESSION['pedido'];
+
   $order_id = (int)($_GET['order_id'] ?? 0);
   $logo = url('favicon-96x96.png');
   $fecha = date('d/m/Y H:i');
