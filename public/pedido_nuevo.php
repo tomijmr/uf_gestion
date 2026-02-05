@@ -4,6 +4,125 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Exportar presupuesto en HTML (para imprimir a PDF)
+if (isset($_GET['export_presupuesto']) && isset($_GET['order_id'])) {
+  $order_id = (int)$_GET['order_id'];
+
+  $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
+                         FROM orders o
+                         JOIN customers c ON c.id = o.customer_id
+                         WHERE o.id = ?");
+  $stmt->execute([$order_id]);
+  $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+  if (!$order) {
+    http_response_code(404);
+    echo "Presupuesto no encontrado";
+    exit;
+  }
+
+  $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
+                              FROM order_items oi
+                              JOIN products p ON p.id = oi.product_id
+                              WHERE oi.order_id = ?");
+  $itemsStmt->execute([$order_id]);
+  $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+  $logo = url('favicon-96x96.png');
+  $fecha = date('d/m/Y H:i');
+  ?>
+  <!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Presupuesto #<?= (int)$order_id ?></title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #222; margin: 24px; }
+      .header { display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #0d6efd; padding-bottom: 12px; }
+      .header img { width: 48px; height: 48px; }
+      .title { font-size: 20px; font-weight: bold; }
+      .sub { color: #555; }
+      .section { margin-top: 16px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+      th { background: #f6f6f6; }
+      .text-end { text-align: right; }
+      .totals { margin-top: 12px; float: right; min-width: 260px; }
+      .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+      .badge { display: inline-block; padding: 4px 8px; background: #0d6efd; color: #fff; border-radius: 4px; font-size: 12px; }
+      .print { margin-top: 16px; }
+      @media print { .print { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <img src="<?= e($logo) ?>" alt="Logo">
+      <div>
+        <div class="title">Presupuesto</div>
+        <div class="sub">Universal Fitness SA</div>
+      </div>
+      <div style="margin-left:auto; text-align:right;">
+        <div class="badge">#<?= (int)$order_id ?></div>
+        <div class="sub"><?= e($fecha) ?></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <strong>Cliente:</strong> <?= e($order['cliente_nombre']) ?><br>
+      <strong>CUIT/DNI:</strong> <?= e($order['cuit_dni']) ?><br>
+      <strong>Teléfono:</strong> <?= e($order['telefono']) ?>
+    </div>
+
+    <div class="section">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Producto</th>
+            <th class="text-end">Cantidad</th>
+            <th class="text-end">Precio</th>
+            <th class="text-end">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($items as $it): ?>
+            <tr>
+              <td><?= e($it['codigo']) ?></td>
+              <td><?= e($it['nombre']) ?></td>
+              <td class="text-end"><?= (float)$it['cant'] ?></td>
+              <td class="text-end"><?= money($it['precio_unit']) ?></td>
+              <td class="text-end"><?= money($it['subtotal']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div><span>Subtotal</span><strong><?= money($order['total_bruto']) ?></strong></div>
+        <div><span>Descuento</span><strong><?= money($order['descuento']) ?></strong></div>
+        <div><span>Total Neto</span><strong><?= money($order['total_neto']) ?></strong></div>
+        <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
+        <div><span>Saldo</span><strong><?= money($order['saldo']) ?></strong></div>
+      </div>
+      <div style="clear: both;"></div>
+    </div>
+
+    <?php if (!empty($order['observaciones'])): ?>
+      <div class="section">
+        <strong>Observaciones:</strong> <?= e($order['observaciones']) ?>
+      </div>
+    <?php endif; ?>
+
+    <div class="print">
+      <button onclick="window.print()">Imprimir / Guardar PDF</button>
+    </div>
+  </body>
+  </html>
+  <?php
+  exit;
+}
+
 // Asegurar columnas de transporte en orders
 try {
   db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS transporte_bonificado TINYINT(1) DEFAULT 0");
@@ -295,7 +414,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         db()->commit();
         unset($_SESSION['pedido']);
-        header('Location: ' . url('pedidos.php') . '?ok=1&id=' . $order_id);
+        header('Location: ' . url('pedido_nuevo.php') . '?step=3&ok=1&order_id=' . $order_id);
         exit;
 
       } catch (Throwable $e) {
@@ -526,19 +645,50 @@ if ($step === 2):
 <?php
 // Paso 3: Pago + Confirmación
 if ($step === 3):
-  if (!$P['customer_id']) { header('Location: ' . url('pedido_nuevo.php') . '?step=1'); exit; }
-  if (!$P['items']) { header('Location: ' . url('pedido_nuevo.php') . '?step=2'); exit; }
-  $cli = getCliente($P['customer_id']);
-  $total = pedido_total_bruto($P['items']);
+  $order_id_export = (int)($_GET['order_id'] ?? 0);
+  if (!$P['customer_id'] && !$order_id_export) { header('Location: ' . url('pedido_nuevo.php') . '?step=1'); exit; }
+  if (!$P['items'] && !$order_id_export) { header('Location: ' . url('pedido_nuevo.php') . '?step=2'); exit; }
+  $cli = $P['customer_id'] ? getCliente($P['customer_id']) : null;
+  $total = $P['items'] ? pedido_total_bruto($P['items']) : 0;
   $descuento = 0; $neto = $total - $descuento;
   $senia = (float)$P['senia']; $saldo = max(0, $neto - $senia);
+  $items_view = $P['items'];
+
+  if ($order_id_export) {
+    $stmtOrder = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
+                                FROM orders o
+                                JOIN customers c ON c.id = o.customer_id
+                                WHERE o.id = ?");
+    $stmtOrder->execute([$order_id_export]);
+    if ($order_export = $stmtOrder->fetch(PDO::FETCH_ASSOC)) {
+      $cli = [
+        'nombre' => $order_export['cliente_nombre'],
+        'cuit_dni' => $order_export['cuit_dni'],
+        'telefono' => $order_export['telefono'],
+        'id' => $order_export['customer_id'] ?? null,
+      ];
+      $total = (float)$order_export['total_bruto'];
+      $descuento = (float)$order_export['descuento'];
+      $neto = (float)$order_export['total_neto'];
+      $senia = (float)$order_export['senia'];
+      $saldo = (float)$order_export['saldo'];
+
+      $stmtItems = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
+                                  FROM order_items oi
+                                  JOIN products p ON p.id = oi.product_id
+                                  WHERE oi.order_id = ?");
+      $stmtItems->execute([$order_id_export]);
+      $items_view = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+    }
+  }
   
   // Cargar cuentas bancarias
   $bank_accounts = db()->query("SELECT id, nombre FROM bank_accounts WHERE activo=1 ORDER BY nombre")->fetchAll();
+  $cliente_id_display = $P['customer_id'] ?: ($cli['id'] ?? null);
   ?>
   <div class="container py-4">
     <h5 class="mb-1">Nuevo Pedido — Paso 3: Pago y Confirmación</h5>
-    <div class="text-muted mb-3">Cliente: <strong><?= e($cli['nombre'] ?? '') ?></strong> (ID <?= (int)$P['customer_id'] ?>)</div>
+    <div class="text-muted mb-3">Cliente: <strong><?= e($cli['nombre'] ?? '') ?></strong><?= $cliente_id_display ? ' (ID ' . (int)$cliente_id_display . ')' : '' ?></div>
 
     <?php if (!empty($error)): ?>
       <div class="alert alert-danger"><?= e($error) ?></div>
@@ -553,11 +703,11 @@ if ($step === 3):
               <table class="table table-sm align-middle">
                 <thead class="table-light"><tr><th>Código</th><th>Nombre</th><th class="text-end">Precio</th><th class="text-end">Cant</th><th class="text-end">Subtotal</th></tr></thead>
                 <tbody>
-                <?php foreach ($P['items'] as $it): ?>
+                <?php foreach ($items_view as $it): ?>
                   <tr>
                     <td><?= e($it['codigo']) ?></td>
                     <td><?= e($it['nombre']) ?></td>
-                    <td class="text-end"><?= money($it['precio']) ?></td>
+                    <td class="text-end"><?= money($it['precio'] ?? $it['precio_unit']) ?></td>
                     <td class="text-end"><?= (float)$it['cant'] ?></td>
                     <td class="text-end"><?= money($it['subtotal']) ?></td>
                   </tr>
@@ -729,6 +879,16 @@ if ($step === 3):
         <div class="card shadow-sm">
           <div class="card-body">
             <h6 class="mb-3">Confirmación</h6>
+            <?php if ($order_id_export): ?>
+              <a class="btn btn-outline-success w-100 mb-2" target="_blank"
+                 href="<?= url('pedido_nuevo.php?export_presupuesto=1&order_id=' . $order_id_export) ?>">
+                Exportar presupuesto
+              </a>
+            <?php else: ?>
+              <button class="btn btn-outline-success w-100 mb-2" type="button" disabled>
+                Exportar presupuesto
+              </button>
+            <?php endif; ?>
             <form method="post">
               <input type="hidden" name="action" value="confirm_order">
               <button class="btn btn-primary w-100">Confirmar pedido</button>
