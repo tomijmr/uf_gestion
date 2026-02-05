@@ -30,6 +30,10 @@ if (isset($_GET['export_presupuesto']) && isset($_GET['order_id'])) {
 
   $logo = url('favicon-96x96.png');
   $fecha = date('d/m/Y H:i');
+  $incluye_iva = (int)($order['incluye_iva'] ?? 1);
+  $iva_pct = 0.21;
+  $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
+  $total_con_iva = (float)$order['total_neto'] + $iva_monto;
   ?>
   <!doctype html>
   <html lang="es">
@@ -102,8 +106,10 @@ if (isset($_GET['export_presupuesto']) && isset($_GET['order_id'])) {
         <div><span>Subtotal</span><strong><?= money($order['total_bruto']) ?></strong></div>
         <div><span>Descuento</span><strong><?= money($order['descuento']) ?></strong></div>
         <div><span>Total Neto</span><strong><?= money($order['total_neto']) ?></strong></div>
+        <div><span>IVA (21%)</span><strong><?= money($iva_monto) ?></strong></div>
+        <div><span>Total con IVA</span><strong><?= money($total_con_iva) ?></strong></div>
         <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
-        <div><span>Saldo</span><strong><?= money($order['saldo']) ?></strong></div>
+        <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
       </div>
       <div style="clear: both;"></div>
     </div>
