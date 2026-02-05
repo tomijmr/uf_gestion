@@ -5,35 +5,71 @@ require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
 // Exportar presupuesto en HTML (para imprimir a PDF)
-if (isset($_GET['export_presupuesto']) && isset($_GET['order_id'])) {
-  $order_id = (int)$_GET['order_id'];
-
-  $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
-                         FROM orders o
-                         JOIN customers c ON c.id = o.customer_id
-                         WHERE o.id = ?");
-  $stmt->execute([$order_id]);
-  $order = $stmt->fetch(PDO::FETCH_ASSOC);
-
-  if (!$order) {
-    http_response_code(404);
-    echo "Presupuesto no encontrado";
-    exit;
-  }
-
-  $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
-                              FROM order_items oi
-                              JOIN products p ON p.id = oi.product_id
-                              WHERE oi.order_id = ?");
-  $itemsStmt->execute([$order_id]);
-  $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-
+if (isset($_GET['export_presupuesto'])) {
+  $order_id = (int)($_GET['order_id'] ?? 0);
   $logo = url('favicon-96x96.png');
   $fecha = date('d/m/Y H:i');
-  $incluye_iva = (int)($order['incluye_iva'] ?? 1);
-  $iva_pct = 0.21;
-  $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
-  $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+
+  if ($order_id) {
+    $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
+                           FROM orders o
+                           JOIN customers c ON c.id = o.customer_id
+                           WHERE o.id = ?");
+    $stmt->execute([$order_id]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$order) {
+      http_response_code(404);
+      echo "Presupuesto no encontrado";
+      exit;
+    }
+
+    $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
+                                FROM order_items oi
+                                JOIN products p ON p.id = oi.product_id
+                                WHERE oi.order_id = ?");
+    $itemsStmt->execute([$order_id]);
+    $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $incluye_iva = (int)($order['incluye_iva'] ?? 1);
+    $iva_pct = 0.21;
+    $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
+    $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+  } else {
+    $order = [
+      'cliente_nombre' => null,
+      'cuit_dni' => null,
+      'telefono' => null,
+      'total_bruto' => pedido_total_bruto($P['items'] ?? []),
+      'descuento' => 0,
+      'total_neto' => pedido_total_bruto($P['items'] ?? []),
+      'senia' => (float)($P['senia'] ?? 0),
+      'saldo' => max(0, pedido_total_bruto($P['items'] ?? []) - (float)($P['senia'] ?? 0)),
+      'observaciones' => trim($P['observaciones'] ?? ''),
+      'incluye_iva' => (int)($P['incluye_iva'] ?? 1),
+    ];
+    $items = array_map(function ($it) {
+      return [
+        'codigo' => $it['codigo'],
+        'nombre' => $it['nombre'],
+        'cant' => $it['cant'],
+        'precio_unit' => $it['precio'],
+        'subtotal' => $it['subtotal'],
+      ];
+    }, $P['items'] ?? []);
+
+    $cli = getCliente($P['customer_id'] ?? null);
+    if ($cli) {
+      $order['cliente_nombre'] = $cli['nombre'];
+      $order['cuit_dni'] = $cli['cuit_dni'];
+      $order['telefono'] = $cli['telefono'];
+    }
+
+    $incluye_iva = (int)$order['incluye_iva'];
+    $iva_pct = 0.21;
+    $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
+    $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+  }
   ?>
   <!doctype html>
   <html lang="es">
@@ -891,9 +927,10 @@ if ($step === 3):
                 Exportar presupuesto
               </a>
             <?php else: ?>
-              <button class="btn btn-outline-success w-100 mb-2" type="button" disabled>
+              <a class="btn btn-outline-success w-100 mb-2" target="_blank"
+                 href="<?= url('pedido_nuevo.php?export_presupuesto=1') ?>">
                 Exportar presupuesto
-              </button>
+              </a>
             <?php endif; ?>
             <form method="post">
               <input type="hidden" name="action" value="confirm_order">
