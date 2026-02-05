@@ -647,6 +647,7 @@ HTML;
     <br><br>
     <div class="center no-print">
         <button onclick="window.print()">Imprimir</button>
+        <a href="/uf_gestion/public/op.php?download_escpos=1&po_id={$po_id}" class="btn">Descargar ESC/POS (.prn)</a>
         <button onclick="window.close()">Cerrar</button>
     </div>
 </body>

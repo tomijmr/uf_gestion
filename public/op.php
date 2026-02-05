@@ -133,6 +133,22 @@ if (isset($_GET['print_ticket'])) {
   exit;
 }
 
+// Descargar ticket ESC/POS (archivo .prn) para envío directo a impresora
+if (isset($_GET['download_escpos'])) {
+  $po_id = (int)($_GET['po_id'] ?? 0);
+  if (!$po_id) {
+    http_response_code(400);
+    echo 'Falta po_id';
+    exit;
+  }
+  $data = generar_ticket_escpos($po_id);
+  $filename = "ticket_po_{$po_id}.prn";
+  header('Content-Type: application/octet-stream');
+  header('Content-Disposition: attachment; filename="' . $filename . '"');
+  echo $data;
+  exit;
+}
+
 // AJAX: Imprimir ticket por estado
 if (isset($_GET['print_ticket_estado'])) {
   $po_id = (int)($_GET['po_id'] ?? 0);
