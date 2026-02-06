@@ -99,102 +99,142 @@ function generar_ticket_html_estado(int $po_id, string $estado, array $datos, ar
         <meta charset="UTF-8">
         <title>Ticket OP #<?= $po_id ?> - <?= e($estado) ?></title>
         <style>
+            /* Print-optimized styles for thermal printers: larger and bolder text */
             @media print {
-                @page { margin: 5mm; size: 80mm auto; }
+                @page { margin: 3mm; size: 80mm auto; }
                 body { margin: 0; }
                 .no-print { display: none; }
+                /* Impresion agresiva: forzar tamaño y grosor en todos los elementos para impresoras térmicas */
+                body * {
+                    font-size: 18px !important;
+                    font-weight: 900 !important;
+                    -webkit-text-stroke: 1px #000 !important;
+                    text-shadow: 1px 0 0 #000, -1px 0 0 #000 !important;
+                }
             }
             body {
-                font-family: 'Courier New', monospace;
-                font-size: 12px;
-                line-height: 1.4;
+                /* Use a heavy sans-serif font for better thermal output */
+                font-family: 'Arial Black', 'Impact', 'Helvetica', 'Trebuchet MS', sans-serif;
+                font-weight: 900;
+                font-size: 18px; /* base increased for better legibility */
+                line-height: 1.1;
                 width: 80mm;
                 margin: 0 auto;
-                padding: 5mm;
+                padding: 3mm 4mm;
                 background: white;
+                color: #000;
+                -webkit-print-color-adjust: exact;
+                text-rendering: optimizeLegibility;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                -webkit-text-stroke: 1px #000; /* add stroke for thickness */
+            }
+            /* Thicken text using stroke + shadows to improve legibility on low-res printers */
+            .thick {
+                font-weight: 900;
+                -webkit-text-stroke: 0.9px #000;
+                text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
             }
             .header {
                 text-align: center;
-                border-bottom: 2px solid #000;
-                padding-bottom: 5px;
+                border-bottom: 3px solid #000;
+                padding-bottom: 6px;
                 margin-bottom: 10px;
             }
             .header h1 {
-                font-size: 16px;
-                font-weight: bold;
-                margin: 5px 0;
+                font-size: 22px;
+                font-weight: 900;
+                margin: 3px 0;
+                text-transform: uppercase;
+                letter-spacing: 0.6px;
+                -webkit-text-stroke: 1px #000;
+                text-shadow: 1px 0 0 #000, -1px 0 0 #000;
             }
             .header h2 {
-                font-size: 14px;
-                font-weight: bold;
-                margin: 3px 0;
+                font-size: 17px;
+                font-weight: 900;
+                margin: 2px 0;
                 text-decoration: underline;
+                -webkit-text-stroke: 0.9px #000;
+                text-shadow: 0.8px 0 0 #000, -0.8px 0 0 #000;
             }
             .section {
-                margin: 10px 0;
+                margin: 8px 0;
                 border-bottom: 1px dashed #000;
-                padding-bottom: 8px;
+                padding-bottom: 6px;
             }
             .section-title {
-                font-weight: bold;
-                font-size: 13px;
-                margin-bottom: 5px;
+                font-weight: 900;
+                font-size: 16px;
+                margin-bottom: 6px;
                 text-decoration: underline;
+                -webkit-text-stroke: 0.7px #000;
+                text-shadow: 0.6px 0 0 #000, -0.6px 0 0 #000;
             }
             .field {
                 margin: 3px 0;
+                font-size: 14px;
             }
             .field-label {
-                font-weight: bold;
+                font-weight: 900;
+                -webkit-text-stroke: 0.6px #000;
             }
             table {
                 width: 100%;
                 border-collapse: collapse;
-                margin: 5px 0;
-                font-size: 11px;
+                margin: 6px 0;
+                font-size: 14px;
             }
             table th {
                 border-bottom: 1px solid #000;
                 text-align: left;
-                padding: 3px 2px;
-                font-weight: bold;
+                padding: 5px 2px;
+                font-weight: 900;
+                -webkit-text-stroke: 0.6px #000;
             }
             table td {
-                padding: 3px 2px;
-                border-bottom: 1px dotted #ccc;
+                padding: 5px 2px;
+                border-bottom: 1px dotted #666;
+                font-size: 14px;
+                font-weight: 700;
             }
             .qty {
                 text-align: right;
+                font-weight: 900;
+                -webkit-text-stroke: 0.6px #000;
             }
             .checklist {
-                margin: 10px 0;
+                margin: 8px 0;
             }
             .checklist-item {
-                margin: 5px 0;
+                margin: 4px 0;
+                font-size: 13px;
             }
             .firma {
-                margin-top: 15px;
-                border-top: 1px solid #000;
+                margin-top: 12px;
+                border-top: 2px solid #000;
                 padding-top: 10px;
+                font-size: 13px;
             }
             .footer {
                 text-align: center;
-                font-size: 10px;
-                margin-top: 10px;
-                color: #666;
+                font-size: 11px;
+                margin-top: 8px;
+                color: #000;
             }
             .highlight {
-                background: #ffeb3b;
                 padding: 5px;
                 margin: 5px 0;
-                font-weight: bold;
+                font-weight: 800;
+                background: transparent;
+                border: 1px solid #000;
             }
             .no-print {
                 text-align: center;
-                margin: 10px 0;
+                margin: 8px 0;
             }
             .btn {
-                padding: 10px 20px;
+                padding: 8px 14px;
                 margin: 5px;
                 font-size: 14px;
                 cursor: pointer;
@@ -603,18 +643,18 @@ HTML;
         <div>Firma: _________________________</div>
     </div>
     <br>
-    <div class="center"><small>Impreso: {$fecha}</small></div>
+    <div class="center"><small>Impreso: " . date('d/m/Y H:i') . "</small></div>
     <br><br>
     <div class="center no-print">
         <button onclick="window.print()">Imprimir</button>
+        <a href="/uf_gestion/public/op.php?download_escpos=1&po_id={$po_id}" class="btn">Descargar ESC/POS (.prn)</a>
         <button onclick="window.close()">Cerrar</button>
     </div>
 </body>
 </html>
 HTML;
     
-    $fecha = date('d/m/Y H:i');
-    $html = str_replace('{$fecha}', $fecha, $html);
+    // Fecha ya embebida directamente en el HTML para evitar variable no definida
     
     return $html;
 }

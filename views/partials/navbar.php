@@ -19,11 +19,11 @@ $MENU = [
   ['label' => 'Clientes',            'href' => url('clientes.php'),             'roles' => ['ADMIN','VENTAS','LECTURA','RRHH']],
   ['label' => 'Pedidos',             'href' => url('pedidos.php'),              'roles' => ['ADMIN','VENTAS','RRHH']],
   // Menú de Inventario dividido:
-  ['label' => 'Materias Primas',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
+  ['label' => 'Materiales',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Maquinas',            'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO','RRHH']],
  # ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
-  ['label' => 'Panel Producción',    'href' => url('panel_produccion.php'),     'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
+  ['label' => 'Producción',    'href' => url('panel_produccion.php'),     'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
   ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA','RRHH']],
   ['label' => 'Caja',                'href' => url('caja.php'),                 'roles' => ['ADMIN','CAJA']],
   ['label' => 'Empleados',           'href' => url('empleados.php'),            'roles' => ['ADMIN','CAJA','RRHH']],
