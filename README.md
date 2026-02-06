@@ -107,12 +107,6 @@ Sistema avanzado de gestión de pagos de empleados con períodos semanales:
 | **RRHH** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ (Solo Asistencia e Incidencias) | ❌ | ❌ |
 | **LECTURA** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-### Rol RRHH (Recursos Humanos):
-- **Acceso Visual:** Dashboard, Clientes, Pedidos, Materias Primas, Máquinas, Empleados
-- **En Empleados:** Solo ve
-  - 📊 Asistencia (registrar y ver)
-  - 📝 Legajo con Incidencias (historial de problemas)
-- **No ve:** Nómina, Sueldos, Períodos, datos salariales
 
 ---
 
