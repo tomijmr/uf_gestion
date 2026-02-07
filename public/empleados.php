@@ -146,14 +146,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       foreach ($employees as $emp) {
         $emp_id = (int)$emp['id'];
 
-        // Al cerrar período: dejar saldo solo por cuotas de préstamos vigentes
-        $prest_stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total
-                                     FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");
-        $prest_stmt->execute([$emp_id]);
-        $cuota_prestamo = (float)($prest_stmt->fetch()['total'] ?? 0);
-
+        // Al cerrar período: limpiar saldo pendiente (solo quedan cuotas de préstamo del nuevo período)
         db()->prepare("UPDATE employees SET saldo_pendiente=? WHERE id=?")
-          ->execute([round($cuota_prestamo, 2), $emp_id]);
+          ->execute([0, $emp_id]);
       }
       
       // Crear nuevo período (próxima semana)
@@ -502,9 +497,14 @@ if ($selected_employee) {
       $descuentos_total = (float)($desc_stmt->fetch()['total'] ?? 0);
     }
     
-    $adelantos_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id=? AND estado='APROBADO'");
-    $adelantos_stmt->execute([$selected_emp_id]);
-    $adelantos_total = (float)($adelantos_stmt->fetch()['total'] ?? 0);
+    $adelantos_total = 0;
+    if ($period) {
+      $adelantos_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
+                                       FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
+                                       AND fecha_solicitud BETWEEN ? AND ?");
+      $adelantos_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $adelantos_total = (float)($adelantos_stmt->fetch()['total'] ?? 0);
+    }
     
     $prestamos_stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");
     $prestamos_stmt->execute([$selected_emp_id]);
@@ -527,7 +527,7 @@ if ($selected_employee) {
       $pagos_periodo_actual = (float)($stmt_pagos->fetch()['total'] ?? 0);
     }
     
-    $saldo_semanal = round($prestamos_total, 2);
+    $saldo_semanal = round($sueldo_base + $pago_horas_extras - $descuentos_total - $adelantos_total - $prestamos_total, 2);
   } catch (Throwable $e) {}
 }
 
@@ -569,9 +569,15 @@ try {
       $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
     }
     
-    // Adelantos
-    $adel = db()->query("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
-    $adelantos = (float)($adel['total'] ?? 0);
+    // Adelantos del período activo
+    $adelantos = 0;
+    if ($period) {
+      $adel_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
+                                  FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
+                                  AND fecha_solicitud BETWEEN ? AND ?");
+      $adel_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $adelantos = (float)($adel_stmt->fetch()['total'] ?? 0);
+    }
     
     // Préstamos
     $prest = db()->query("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
@@ -597,8 +603,11 @@ try {
 // Calcular saldos del período actual (incluyendo saldo anterior si fue transferido)
 foreach ($resumen_empleados as &$emp) {
   try {
-    // Mostrar saldo solo por cuotas de préstamos vigentes
-    $emp['saldo'] = round($emp['cuota_prestamo'], 2);
+    // Saldo a pagar = base + horas extras - descuentos - adelantos - cuota préstamos
+    $emp['saldo'] = round(
+      $emp['sueldo_base_semanal'] + $emp['pago_horas_extras'] - $emp['descuentos'] - $emp['adelantos'] - $emp['cuota_prestamo'],
+      2
+    );
   } catch (Throwable $e) { 
     error_log("Error calculando saldo: " . $e->getMessage());
     $emp['saldo'] = 0; 
@@ -991,6 +1000,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               if ($emp['suspendido']) $estado_badge = '<span class="badge bg-danger">Suspendido</span>';
               elseif ($emp['en_licencia']) $estado_badge = '<span class="badge bg-warning">Licencia</span>';
               else $estado_badge = '<span class="badge bg-success">Activo</span>';
+              $saldo_prestamo = (float)($emp['saldo'] ?? 0);
             ?>
               <tr>
                 <td><?= e($emp['nombre_completo']) ?></td>
@@ -1001,7 +1011,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <td><?= money($emp['adelantos']) ?></td>
                 <td><?= money($emp['cuota_prestamo']) ?></td>
                 <td><?= $estado_badge ?></td>
-                <td class="text-end fw-semibold" style="color: <?= $emp['saldo'] >= 0 ? 'green' : 'red' ?>"><?= money($emp['saldo']) ?></td>
+                <td class="text-end fw-semibold" style="color: <?= $saldo_prestamo >= 0 ? 'green' : 'red' ?>"><?= money($saldo_prestamo) ?></td>
                 <td><a href="?tab=movimientos&emp_id=<?= (int)$emp['id'] ?>" class="btn btn-sm btn-outline-primary">Ver Legajo</a></td>
               </tr>
             <?php endforeach; endif; ?>
@@ -1037,6 +1047,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               if ($emp['suspendido']) $estado_badge = '<span class="badge bg-danger">Suspendido</span>';
               elseif ($emp['en_licencia']) $estado_badge = '<span class="badge bg-warning">Licencia</span>';
               else $estado_badge = '<span class="badge bg-success">Activo</span>';
+              $saldo_prestamo = (float)($emp['saldo'] ?? 0);
             ?>
               <tr>
                 <td><?= e($emp['nombre_completo']) ?></td>
@@ -1047,7 +1058,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <td><?= money($emp['adelantos']) ?></td>
                 <td><?= money($emp['cuota_prestamo']) ?></td>
                 <td><?= $estado_badge ?></td>
-                <td class="text-end fw-semibold" style="color: <?= $emp['saldo'] >= 0 ? 'green' : 'red' ?>"><?= money($emp['saldo']) ?></td>
+                <td class="text-end fw-semibold" style="color: <?= $saldo_prestamo >= 0 ? 'green' : 'red' ?>"><?= money($saldo_prestamo) ?></td>
                 <td>
                   <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#pagarModal" 
                     data-empid="<?= (int)$emp['id'] ?>" 
@@ -1057,7 +1068,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                     data-descuentos="<?= (float)$emp['descuentos'] ?>" 
                     data-adelantos="<?= (float)$emp['adelantos'] ?>" 
                     data-prestamos="<?= (float)$emp['cuota_prestamo'] ?>" 
-                    data-saldo="<?= (float)$emp['saldo'] ?>"
+                    data-saldo="<?= (float)$saldo_prestamo ?>"
                     <?= ($emp['suspendido'] || $emp['en_licencia']) ? 'disabled title="Empleado no disponible para pago"' : '' ?>>
                     PAGAR
                   </button>
