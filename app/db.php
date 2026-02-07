@@ -11,7 +11,7 @@ function db(): PDO {
         $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
 
         // $host = getenv('DB_HOST') ?: 'localhost';
-        // $db   = getenv('DB_NAME') ?: 'erp_mvp';
+        // $db   = getenv('DB_NAME') ?: 'erp_mvp';  
         // $user = getenv('DB_USER') ?: 'root';
         // $pass = getenv('DB_PASS') ?: '';
         // $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";

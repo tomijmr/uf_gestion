@@ -145,42 +145,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       
       foreach ($employees as $emp) {
         $emp_id = (int)$emp['id'];
-        
-        // Calcular lo que debía cobrar en el período
-        $sueldo_base = (float)($emp['pago_semanal'] ?? 0);
-        
-        // Horas extras del período
-        $he_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) as total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-        $he_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
-        $horas_extras = (float)($he_stmt->fetch()['total'] ?? 0);
-        $pago_horas_extras = $horas_extras * (float)($emp['pago_por_hora'] ?? 0);
-        
-        // Descuentos del período
-        $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) as total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-        // Descuentos del período
-        $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) as total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-        $desc_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
-        $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
-        
-        // Total a pagar en el período (base + extras - descuentos)
-        $total_periodo = $sueldo_base + $pago_horas_extras - $descuentos;
-        
-        // Total pagado en el período
-        $pagado_stmt = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
-        $pagado_stmt->execute([$emp_id, $period['id']]);
-        $pagado = (float)($pagado_stmt->fetch()['total'] ?? 0);
-        
-        // Obtener el saldo del período anterior (que estaba guardado antes de iniciar este período)
-        $saldo_anterior_stmt = db()->prepare("SELECT COALESCE(saldo_pendiente, 0) as saldo FROM employees WHERE id=?");
-        $saldo_anterior_stmt->execute([$emp_id]);
-        $saldo_anterior = (float)($saldo_anterior_stmt->fetch()['saldo'] ?? 0);
-        
-        // Calcular el nuevo saldo: lo que debía (total_periodo) + saldo anterior - lo pagado
-        $nuevo_saldo = round($total_periodo + $saldo_anterior - $pagado, 2);
-        
-        // Actualizar el saldo_pendiente del empleado para el nuevo período
+
+        // Al cerrar período: dejar saldo solo por cuotas de préstamos vigentes
+        $prest_stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total
+                                     FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");
+        $prest_stmt->execute([$emp_id]);
+        $cuota_prestamo = (float)($prest_stmt->fetch()['total'] ?? 0);
+
         db()->prepare("UPDATE employees SET saldo_pendiente=? WHERE id=?")
-          ->execute([$nuevo_saldo, $emp_id]);
+          ->execute([round($cuota_prestamo, 2), $emp_id]);
       }
       
       // Crear nuevo período (próxima semana)
@@ -512,15 +485,22 @@ if ($selected_employee) {
       $sueldo_base = 0;
     }
     
-    // Calcular horas extras de la última semana
-    $horas_extras_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total FROM employee_attendance WHERE employee_id=? AND DATE(fecha) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)");
-    $horas_extras_stmt->execute([$selected_emp_id]);
-    $horas_extras_total = (float)($horas_extras_stmt->fetch()['total'] ?? 0);
+    // Calcular horas extras del período activo
+    $period = get_active_period();
+    $horas_extras_total = 0;
+    if ($period) {
+      $horas_extras_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $horas_extras_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $horas_extras_total = (float)($horas_extras_stmt->fetch()['total'] ?? 0);
+    }
     $pago_horas_extras = $horas_extras_total * (float)($selected_employee['pago_por_hora'] ?? 0);
     
-    $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND DATE(fecha) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)");
-    $desc_stmt->execute([$selected_emp_id]);
-    $descuentos_total = (float)($desc_stmt->fetch()['total'] ?? 0);
+    $descuentos_total = 0;
+    if ($period) {
+      $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $desc_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $descuentos_total = (float)($desc_stmt->fetch()['total'] ?? 0);
+    }
     
     $adelantos_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id=? AND estado='APROBADO'");
     $adelantos_stmt->execute([$selected_emp_id]);
@@ -547,7 +527,7 @@ if ($selected_employee) {
       $pagos_periodo_actual = (float)($stmt_pagos->fetch()['total'] ?? 0);
     }
     
-    $saldo_semanal = round($debe_este_periodo + $saldo_periodo_anterior - $pagos_periodo_actual, 2);
+    $saldo_semanal = round($prestamos_total, 2);
   } catch (Throwable $e) {}
 }
 
@@ -556,6 +536,7 @@ $resumen_empleados = [];
 try {
   // Primero, obtener lista de empleados
   $empleados_base = db()->query("SELECT id, nombre, apellido, pago_semanal, pago_por_hora, suspendido, en_licencia_medica FROM employees WHERE activo=1 ORDER BY nombre, apellido")->fetchAll();
+  $period = get_active_period();
   
   // Para cada empleado, calcular sus valores
   foreach ($empleados_base as $emp) {
@@ -569,14 +550,24 @@ try {
       $sueldo_base = 0;
     }
     
-    // Horas extras de la última semana
-    $he = db()->query("SELECT COALESCE(SUM(horas_extras), 0) AS total FROM employee_attendance WHERE employee_id={$emp_id} AND DATE(fecha) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")->fetch();
-    $horas_extras = (float)($he['total'] ?? 0);
+    // Horas extras del período activo
+    $horas_extras = 0;
+    if ($period) {
+      $he_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total
+                                FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $he_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $horas_extras = (float)($he_stmt->fetch()['total'] ?? 0);
+    }
     $pago_horas_extras = $horas_extras * (float)($emp['pago_por_hora'] ?? 0);
     
-    // Descuentos
-    $desc = db()->query("SELECT COALESCE(SUM(CASE WHEN tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN monto_descuento ELSE 0 END), 0) AS total FROM employee_discounts WHERE employee_id={$emp_id}")->fetch();
-    $descuentos = (float)($desc['total'] ?? 0);
+    // Descuentos del período activo
+    $descuentos = 0;
+    if ($period) {
+      $desc_stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN monto_descuento ELSE 0 END), 0) AS total
+                                  FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $desc_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
+    }
     
     // Adelantos
     $adel = db()->query("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
@@ -606,28 +597,8 @@ try {
 // Calcular saldos del período actual (incluyendo saldo anterior si fue transferido)
 foreach ($resumen_empleados as &$emp) {
   try {
-    $period = get_active_period();
-    
-    // Obtener saldo del período anterior (transferido al crear el período)
-    $stmt_saldo = db()->prepare("SELECT COALESCE(saldo_pendiente,0) AS saldo_pendiente FROM employees WHERE id=?");
-    $stmt_saldo->execute([(int)$emp['id']]);
-    $saldo_periodo_anterior = (float)($stmt_saldo->fetch()['saldo_pendiente'] ?? 0);
-    
-    // Lo que debe este período (base + extras - descuentos - adelantos - préstamos)
-    $debe_periodo = $emp['sueldo_base_semanal'] + $emp['pago_horas_extras'] - ($emp['descuentos'] + $emp['adelantos'] + $emp['cuota_prestamo']);
-    
-    // Lo pagado en este período
-    $pagos_periodo = 0;
-    if ($period) {
-      $stmt_pagos = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
-      $stmt_pagos->execute([(int)$emp['id'], $period['id']]);
-      $pagos_periodo = (float)($stmt_pagos->fetch()['total'] ?? 0);
-    }
-    
-    // Saldo total = lo que debe este período + saldo anterior - lo pagado
-    // El saldo anterior YA está incluido en saldo_pendiente cuando se transfiere el período
-    // Por lo tanto: saldo final = sueldo_base + horas_extras - descuentos - adelantos - prestamos + saldo_anterior - pagado
-    $emp['saldo'] = round($debe_periodo + $saldo_periodo_anterior - $pagos_periodo, 2);
+    // Mostrar saldo solo por cuotas de préstamos vigentes
+    $emp['saldo'] = round($emp['cuota_prestamo'], 2);
   } catch (Throwable $e) { 
     error_log("Error calculando saldo: " . $e->getMessage());
     $emp['saldo'] = 0; 
