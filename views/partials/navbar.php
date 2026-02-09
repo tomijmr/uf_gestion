@@ -9,8 +9,10 @@ $role_enum = strtoupper($user['role'] ?? '');
 $role_name = $role_enum ?: strtoupper($user['rol_nombre'] ?? '');
 
 /** Helper: ¿tiene alguno de estos roles? (usa check_role() del auth) */
-function can(...$roles): bool {
-  return function_exists('check_role') ? check_role(...$roles) : false;
+if (!function_exists('can')) {
+  function can(...$roles): bool {
+    return function_exists('check_role') ? check_role(...$roles) : false;
+  }
 }
 
 /** Definición de menú por roles (fácil de ajustar) */

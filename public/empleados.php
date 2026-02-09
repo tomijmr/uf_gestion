@@ -4,6 +4,242 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// ================== IMPRESIONES ==================
+if (isset($_GET['print_legajo']) && isset($_GET['emp_id'])) {
+  $emp_id = (int)$_GET['emp_id'];
+  $stmt = db()->prepare("SELECT * FROM employees WHERE id=?");
+  $stmt->execute([$emp_id]);
+  $emp = $stmt->fetch(PDO::FETCH_ASSOC);
+  if (!$emp) {
+    http_response_code(404);
+    echo "Empleado no encontrado";
+    exit;
+  }
+
+  $stmt = db()->prepare("SELECT 'DESCUENTO' AS tipo, fecha, monto_descuento AS monto, razon AS detalle FROM employee_discounts WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $descuentos = $stmt->fetchAll() ?: [];
+
+  $stmt = db()->prepare("SELECT 'ADELANTO' AS tipo, fecha_solicitud AS fecha, monto, razon AS detalle FROM employee_advances WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $adelantos = $stmt->fetchAll() ?: [];
+
+  $stmt = db()->prepare("SELECT 'PRESTAMO' AS tipo, fecha_solicitud AS fecha, monto_solicitado AS monto, razon AS detalle FROM employee_loans WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $prestamos = $stmt->fetchAll() ?: [];
+
+  $stmt = db()->prepare("SELECT 'INCIDENCIA' AS tipo, fecha, 0 AS monto, CONCAT(tipo, ' - ', gravedad, ': ', descripcion) AS detalle FROM employee_incidents WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $incidencias = $stmt->fetchAll() ?: [];
+
+  $movimientos = array_merge($descuentos, $adelantos, $prestamos, $incidencias);
+  usort($movimientos, fn($a, $b) => strtotime($b['fecha']) <=> strtotime($a['fecha']));
+
+  $logo = url('favicon-96x96.png');
+  $fecha = date('d/m/Y H:i');
+  ?>
+  <!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Legajo - <?= e($emp['nombre'] . ' ' . $emp['apellido']) ?></title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      body { font-family: Arial, sans-serif; color: #222; }
+      .header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #0d6efd; padding-bottom: 8px; }
+      .header img { width: 40px; height: 40px; }
+      .title { font-size: 18px; font-weight: bold; }
+      .sub { color: #555; font-size: 12px; }
+      .section { margin-top: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+      th { background: #f6f6f6; }
+      .text-end { text-align: right; }
+      .print { margin-top: 12px; }
+      @media print { .print { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <img src="<?= e($logo) ?>" alt="Logo">
+      <div>
+        <div class="title">Legajo de Empleado</div>
+        <div class="sub">Universal Fitness SA</div>
+      </div>
+      <div style="margin-left:auto; text-align:right;" class="sub"><?= e($fecha) ?></div>
+    </div>
+
+    <div class="section">
+      <strong>Nombre:</strong> <?= e($emp['nombre'] . ' ' . $emp['apellido']) ?><br>
+      <strong>DNI:</strong> <?= e($emp['dni'] ?? '—') ?><br>
+      <strong>Teléfono:</strong> <?= e($emp['telefono'] ?? '—') ?><br>
+      <strong>Domicilio:</strong> <?= e($emp['domicilio'] ?? '—') ?><br>
+      <strong>Fecha Contratación:</strong> <?= e($emp['fecha_contratacion'] ?? '—') ?>
+    </div>
+
+    <div class="section">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Detalle</th>
+            <th class="text-end">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!$movimientos): ?>
+            <tr><td colspan="4" class="text-end">Sin movimientos</td></tr>
+          <?php else: foreach ($movimientos as $m): ?>
+            <tr>
+              <td><?= e($m['fecha']) ?></td>
+              <td><?= e($m['tipo']) ?></td>
+              <td><?= e($m['detalle'] ?? '') ?></td>
+              <td class="text-end"><?= $m['monto'] ? money($m['monto']) : '—' ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="print">
+      <button onclick="window.print()">Imprimir</button>
+    </div>
+  </body>
+  </html>
+  <?php
+  exit;
+}
+
+if (isset($_GET['print_periodo']) && isset($_GET['period_id'])) {
+  $period_id = (int)$_GET['period_id'];
+  $stmt = db()->prepare("SELECT * FROM payroll_periods WHERE id=?");
+  $stmt->execute([$period_id]);
+  $period = $stmt->fetch(PDO::FETCH_ASSOC);
+  if (!$period) {
+    http_response_code(404);
+    echo "Período no encontrado";
+    exit;
+  }
+
+  $desde = $period['fecha_inicio'];
+  $hasta = $period['fecha_fin'];
+
+  $stmt = db()->prepare("SELECT e.nombre, e.apellido, d.fecha, d.monto_descuento AS monto, d.razon AS detalle
+                         FROM employee_discounts d
+                         JOIN employees e ON e.id = d.employee_id
+                         WHERE d.fecha BETWEEN ? AND ?
+                         ORDER BY d.fecha DESC");
+  $stmt->execute([$desde, $hasta]);
+  $descuentos = $stmt->fetchAll() ?: [];
+
+  $stmt = db()->prepare("SELECT e.nombre, e.apellido, i.fecha, i.tipo, i.gravedad, i.descripcion
+                         FROM employee_incidents i
+                         JOIN employees e ON e.id = i.employee_id
+                         WHERE i.fecha BETWEEN ? AND ?
+                         ORDER BY i.fecha DESC");
+  $stmt->execute([$desde, $hasta]);
+  $incidencias = $stmt->fetchAll() ?: [];
+
+  $logo = url('favicon-96x96.png');
+  $fecha = date('d/m/Y H:i');
+  ?>
+  <!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Incidencias y Descuentos</title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      body { font-family: Arial, sans-serif; color: #222; }
+      .header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #0d6efd; padding-bottom: 8px; }
+      .header img { width: 40px; height: 40px; }
+      .title { font-size: 18px; font-weight: bold; }
+      .sub { color: #555; font-size: 12px; }
+      .section { margin-top: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+      th { background: #f6f6f6; }
+      .text-end { text-align: right; }
+      .print { margin-top: 12px; }
+      @media print { .print { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <img src="<?= e($logo) ?>" alt="Logo">
+      <div>
+        <div class="title">Incidencias y Descuentos</div>
+        <div class="sub">Período: <?= e($desde) ?> a <?= e($hasta) ?></div>
+      </div>
+      <div style="margin-left:auto; text-align:right;" class="sub"><?= e($fecha) ?></div>
+    </div>
+
+    <div class="section">
+      <h4 style="margin:0;">Descuentos</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Empleado</th>
+            <th>Detalle</th>
+            <th class="text-end">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!$descuentos): ?>
+            <tr><td colspan="4" class="text-end">Sin descuentos</td></tr>
+          <?php else: foreach ($descuentos as $d): ?>
+            <tr>
+              <td><?= e($d['fecha']) ?></td>
+              <td><?= e($d['nombre'] . ' ' . $d['apellido']) ?></td>
+              <td><?= e($d['detalle'] ?? '') ?></td>
+              <td class="text-end"><?= money($d['monto']) ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h4 style="margin:0;">Incidencias</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Empleado</th>
+            <th>Tipo</th>
+            <th>Gravedad</th>
+            <th>Descripción</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!$incidencias): ?>
+            <tr><td colspan="5" class="text-end">Sin incidencias</td></tr>
+          <?php else: foreach ($incidencias as $i): ?>
+            <tr>
+              <td><?= e($i['fecha']) ?></td>
+              <td><?= e($i['nombre'] . ' ' . $i['apellido']) ?></td>
+              <td><?= e($i['tipo']) ?></td>
+              <td><?= e($i['gravedad']) ?></td>
+              <td><?= e($i['descripcion']) ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="print">
+      <button onclick="window.print()">Imprimir</button>
+    </div>
+  </body>
+  </html>
+  <?php
+  exit;
+}
+
 // Determinar si es rol RRHH (solo ve asistencias e incidencias)
 $is_rrhh_only = check_role('RRHH') && !check_role('ADMIN', 'CAJA');
 
@@ -109,12 +345,12 @@ function get_employee_period_balance($employee_id, $period_id) {
   return ['pagado' => $pagado, 'saldo_anterior' => $saldo_anterior];
 }
 
-$validTabs = ['empleados','asistencia','movimientos','resumen','nomina','periodos'];
+$validTabs = ['empleados','asistencia','movimientos','resumen','nomina','periodos','impresiones'];
 $tab = $_GET['tab'] ?? 'empleados';
 
 // Si es RRHH, solo permitir asistencia e incidencias (movimientos)
 if ($is_rrhh_only) {
-  $validTabs = ['asistencia', 'movimientos'];
+  $validTabs = ['asistencia', 'movimientos', 'impresiones'];
   $tab = in_array($tab, $validTabs, true) ? $tab : 'asistencia';
 }
 
@@ -674,6 +910,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     <?php endif; ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('asistencia',$tab) ?>" data-bs-toggle="tab" data-bs-target="#asistencia" type="button">Asistencia</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('movimientos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#movimientos" type="button">Legajo</button></li>
+    <li class="nav-item"><button class="nav-link <?= tabActive('impresiones',$tab) ?>" data-bs-toggle="tab" data-bs-target="#impresiones" type="button">Impresiones</button></li>
     <?php if (!$is_rrhh_only): ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('resumen',$tab) ?>" data-bs-toggle="tab" data-bs-target="#resumen" type="button">Resumen de Sueldos</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('nomina',$tab) ?>" data-bs-toggle="tab" data-bs-target="#nomina" type="button">Nómina</button></li>
@@ -842,7 +1079,13 @@ include __DIR__ . '/../views/partials/navbar.php';
         <?php if ($selected_employee): ?>
           <div class="card mb-3">
             <div class="card-body small">
-              <h6 class="mb-2">Datos del empleado</h6>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Datos del empleado</h6>
+                <a class="btn btn-sm btn-outline-primary" target="_blank"
+                   href="<?= url('empleados.php?print_legajo=1&emp_id=' . (int)$selected_emp_id) ?>">
+                  Imprimir Legajo A4
+                </a>
+              </div>
               <div class="row g-2">
                 <div class="col-md-6">
                   <div><strong>Nombre:</strong> <?= e($selected_employee['nombre'] . ' ' . $selected_employee['apellido']) ?></div>
@@ -1247,6 +1490,58 @@ include __DIR__ . '/../views/partials/navbar.php';
           <li>Al cerrar un período, los saldos pendientes se transfieren al siguiente</li>
           <li>Un período debe cerrarse antes de que los saldos pasen a la próxima semana</li>
         </ul>
+      </div>
+    </div>
+
+    <!-- IMPRESIONES -->
+    <div class="tab-pane fade <?= paneActive('impresiones',$tab) ?>" id="impresiones">
+      <h6>Impresiones A4</h6>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <h6 class="mb-3">Legajo individual</h6>
+              <form method="get" target="_blank">
+                <input type="hidden" name="print_legajo" value="1">
+                <div class="mb-2">
+                  <label class="form-label">Empleado</label>
+                  <select name="emp_id" class="form-select" required>
+                    <option value="">— Seleccionar —</option>
+                    <?php foreach ($employees_list as $e): ?>
+                      <option value="<?= (int)$e['id'] ?>"><?= e($e['nombre_completo']) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <button class="btn btn-outline-primary">Imprimir Legajo A4</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <h6 class="mb-3">Incidencias y Descuentos por período</h6>
+              <?php $periods_print = db()->query("SELECT * FROM payroll_periods ORDER BY fecha_inicio DESC LIMIT 50")->fetchAll(); ?>
+              <form method="get" target="_blank">
+                <input type="hidden" name="print_periodo" value="1">
+                <div class="mb-2">
+                  <label class="form-label">Período</label>
+                  <select name="period_id" class="form-select" required>
+                    <option value="">— Seleccionar —</option>
+                    <?php foreach ($periods_print as $p): ?>
+                      <option value="<?= (int)$p['id'] ?>">
+                        #<?= (int)$p['id'] ?> — <?= e($p['fecha_inicio']) ?> a <?= e($p['fecha_fin']) ?> (<?= e($p['estado']) ?>)
+                      </option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <button class="btn btn-outline-primary">Imprimir A4</button>
+              </form>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
