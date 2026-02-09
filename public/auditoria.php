@@ -181,13 +181,6 @@ $chartIngresosGastos = [
   'gastos'          => [$gastosTotalAct, $gastosTotalPrev],
 ];
 
-$chartGastosCatLabels = [];
-$chartGastosCatData   = [];
-foreach ($gastosCatAct as $g) {
-  $chartGastosCatLabels[] = $g['categoria'];
-  $chartGastosCatData[]   = (float)$g['total'];
-}
-
 $chartTopPTLabels = [];
 $chartTopPTUnits  = [];
 foreach ($topMaquinas as $m) {
@@ -206,6 +199,13 @@ include __DIR__ . '/../views/partials/navbar.php';
   .no-print, .navbar { display: none !important; }
   .container { max-width: 100% !important; }
   .card { box-shadow: none !important; }
+  body { font-size: 11px; }
+  h5, h6 { margin-bottom: 6px; }
+  .card-body { padding: 10px !important; }
+  .row { break-inside: avoid; page-break-inside: avoid; }
+  .card, .table-responsive, table, canvas { break-inside: avoid; page-break-inside: avoid; }
+  .table-responsive { overflow: visible !important; }
+  canvas { max-height: 200px !important; }
 </style>
 <?php endif; ?>
 <div class="container py-4">
@@ -372,7 +372,24 @@ include __DIR__ . '/../views/partials/navbar.php';
           <?php if (!$gastosCatAct): ?>
             <p class="text-muted small mb-0">No hay gastos registrados en el período.</p>
           <?php else: ?>
-            <canvas id="chartGastosCategoria" style="max-height:260px;"></canvas>
+            <div class="table-responsive">
+              <table class="table table-sm mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Categoría</th>
+                    <th class="text-end">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($gastosCatAct as $g): ?>
+                  <tr>
+                    <td><?= e($g['categoria']) ?></td>
+                    <td class="text-end"><?= money($g['total']) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
           <?php endif; ?>
         </div>
       </div>
@@ -456,9 +473,11 @@ include __DIR__ . '/../views/partials/navbar.php';
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+<?php if ($isPrint): ?>
+Chart.defaults.animation = false;
+Chart.defaults.responsiveAnimationDuration = 0;
+<?php endif; ?>
 const chartIngresosGastosData = <?= json_encode($chartIngresosGastos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-const gastosCatLabels = <?= json_encode($chartGastosCatLabels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-const gastosCatData   = <?= json_encode($chartGastosCatData, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
 const topPTLabels     = <?= json_encode($chartTopPTLabels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
 const topPTUnits      = <?= json_encode($chartTopPTUnits, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
 
@@ -492,26 +511,6 @@ function makeChartIngresosGastos() {
   });
 }
 
-function makeChartGastosCategoria() {
-  const ctx = document.getElementById('chartGastosCategoria');
-  if (!ctx || !gastosCatLabels.length) return;
-  new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: gastosCatLabels,
-      datasets: [{
-        data: gastosCatData,
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'bottom' }
-      }
-    }
-  });
-}
-
 function makeChartTopMaquinas() {
   const ctx = document.getElementById('chartTopMaquinas');
   if (!ctx || !topPTLabels.length) return;
@@ -539,7 +538,6 @@ function makeChartTopMaquinas() {
 
 document.addEventListener('DOMContentLoaded', () => {
   makeChartIngresosGastos();
-  makeChartGastosCategoria();
   makeChartTopMaquinas();
 });
 </script>
@@ -548,7 +546,9 @@ document.addEventListener('DOMContentLoaded', () => {
 <?php if ($isPrint): ?>
 <script>
   window.addEventListener('load', function () {
-    window.print();
+    setTimeout(function () {
+      window.print();
+    }, 500);
   });
 </script>
 <?php endif; ?>
