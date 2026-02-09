@@ -4,6 +4,8 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+$isPrint = isset($_GET['print']);
+
 // --------- RANGO DE FECHAS (PERÍODO ACTUAL) ----------
 $hoy = date('Y-m-d');
 $desde = $_GET['desde'] ?? date('Y-m-01');
@@ -193,15 +195,25 @@ foreach ($topMaquinas as $m) {
   $chartTopPTUnits[]  = (float)$m['unidades'];
 }
 
+$printUrl = url('auditoria.php') . '?desde=' . urlencode($desde) . '&hasta=' . urlencode($hasta) . '&print=1';
+
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 ?>
+<?php if ($isPrint): ?>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  .no-print, .navbar { display: none !important; }
+  .container { max-width: 100% !important; }
+  .card { box-shadow: none !important; }
+</style>
+<?php endif; ?>
 <div class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0">Auditoría & Analytics</h5>
   </div>
 
-  <form class="row g-2 mb-3" method="get" action="<?= url('auditoria.php') ?>">
+  <form class="row g-2 mb-3 no-print" method="get" action="<?= url('auditoria.php') ?>">
     <div class="col-md-3">
       <label class="form-label">Desde</label>
       <input type="date" name="desde" class="form-control" value="<?= e($desde) ?>">
@@ -217,6 +229,10 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div class="col-md-3 d-grid">
       <label class="form-label">&nbsp;</label>
       <a class="btn btn-outline-secondary" href="<?= url('auditoria.php') ?>">Reset</a>
+    </div>
+    <div class="col-md-3 d-grid">
+      <label class="form-label">&nbsp;</label>
+      <a class="btn btn-outline-primary" target="_blank" href="<?= e($printUrl) ?>">Imprimir A4 Horizontal</a>
     </div>
   </form>
 
@@ -529,3 +545,10 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>
+<?php if ($isPrint): ?>
+<script>
+  window.addEventListener('load', function () {
+    window.print();
+  });
+</script>
+<?php endif; ?>
