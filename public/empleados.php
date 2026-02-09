@@ -112,19 +112,32 @@ if (isset($_GET['print_legajo']) && isset($_GET['emp_id'])) {
   exit;
 }
 
-if (isset($_GET['print_periodo']) && isset($_GET['period_id'])) {
-  $period_id = (int)$_GET['period_id'];
-  $stmt = db()->prepare("SELECT * FROM payroll_periods WHERE id=?");
-  $stmt->execute([$period_id]);
-  $period = $stmt->fetch(PDO::FETCH_ASSOC);
-  if (!$period) {
-    http_response_code(404);
-    echo "Período no encontrado";
+if (isset($_GET['print_periodo'])) {
+  $desde_in = trim($_GET['desde'] ?? '');
+  $hasta_in = trim($_GET['hasta'] ?? '');
+
+  if ($desde_in === '' || $hasta_in === '') {
+    http_response_code(400);
+    echo "Debes seleccionar un rango de fechas";
     exit;
   }
 
-  $desde = $period['fecha_inicio'];
-  $hasta = $period['fecha_fin'];
+  $desde_ts = strtotime($desde_in);
+  $hasta_ts = strtotime($hasta_in);
+  if ($desde_ts === false || $hasta_ts === false) {
+    http_response_code(400);
+    echo "Rango de fechas inválido";
+    exit;
+  }
+
+  if ($desde_ts > $hasta_ts) {
+    http_response_code(400);
+    echo "La fecha desde no puede ser mayor que la fecha hasta";
+    exit;
+  }
+
+  $desde = date('Y-m-d', $desde_ts);
+  $hasta = date('Y-m-d', $hasta_ts);
 
   $stmt = db()->prepare("SELECT e.nombre, e.apellido, d.fecha, d.monto_descuento AS monto, d.razon AS detalle
                          FROM employee_discounts d
@@ -1349,86 +1362,6 @@ include __DIR__ . '/../views/partials/navbar.php';
       </div>
     </div>
 
-  </div>
-</div>
-
-<!-- Modal: Pagar Nómina -->
-<div class="modal fade" id="pagarModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <form method="post" id="pagar-form">
-        <input type="hidden" name="action" value="registrar_nomina">
-        <input type="hidden" name="employee_id" id="modal_employee_id" value="">
-        <input type="hidden" name="fecha_pago" value="<?= date('Y-m-d') ?>">
-        <input type="hidden" name="sueldo_base" id="modal_sueldo_base" value="0">
-        <input type="hidden" name="descuentos_total" id="modal_descuentos" value="0">
-        <input type="hidden" name="adelantos_total" id="modal_adelantos" value="0">
-        <input type="hidden" name="prestamos_cuota" id="modal_prestamos" value="0">
-        <div class="modal-header">
-          <h5 class="modal-title">Pagar Nómina</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="mb-2"><strong id="modal_empname"></strong></div>
-          <div class="mb-2">Sueldo Base: <span id="modal_sueldo_text"></span></div>
-          <div class="mb-2">Horas Extras: <span id="modal_he_text"></span></div>
-          <div class="mb-2">Descuentos: <span id="modal_desc_text"></span></div>
-          <div class="mb-2">Adelantos: <span id="modal_adel_text"></span></div>
-          <div class="mb-2">Cuota Préstamo: <span id="modal_prest_text"></span></div>
-          <div class="mb-3">
-            <label class="form-label">Monto a pagar</label>
-            <input type="number" step="0.01" min="0" name="sueldo_neto" id="modal_monto_pagar" class="form-control">
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-success">Confirmar pago</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<script>
-  var pagarModal = document.getElementById('pagarModal');
-  if (pagarModal) {
-    pagarModal.addEventListener('show.bs.modal', function (event) {
-      var button = event.relatedTarget;
-      var empId = button.getAttribute('data-empid');
-      var empName = button.getAttribute('data-empname');
-      var sueldo = parseFloat(button.getAttribute('data-sueldo') || 0);
-      var horasExtras = parseFloat(button.getAttribute('data-horasextras') || 0);
-      var desc = parseFloat(button.getAttribute('data-descuentos') || 0);
-      var adel = parseFloat(button.getAttribute('data-adelantos') || 0);
-      var prest = parseFloat(button.getAttribute('data-prestamos') || 0);
-      var saldo = parseFloat(button.getAttribute('data-saldo') || 0);
-
-      document.getElementById('modal_employee_id').value = empId;
-      document.getElementById('modal_empname').textContent = empName;
-      document.getElementById('modal_sueldo_base').value = sueldo + horasExtras; // Include HE in base
-      document.getElementById('modal_descuentos').value = desc;
-      document.getElementById('modal_adelantos').value = adel;
-      document.getElementById('modal_prestamos').value = prest;
-
-      document.getElementById('modal_sueldo_text').textContent = sueldo.toFixed(2);
-      document.getElementById('modal_he_text').textContent = horasExtras.toFixed(2);
-      document.getElementById('modal_desc_text').textContent = desc.toFixed(2);
-      document.getElementById('modal_adel_text').textContent = adel.toFixed(2);
-      document.getElementById('modal_prest_text').textContent = prest.toFixed(2);
-      document.getElementById('modal_monto_pagar').value = saldo.toFixed(2);
-    });
-  }
-
-  // Opcional: validar antes de enviar
-  document.getElementById('pagar-form')?.addEventListener('submit', function(e){
-    var monto = parseFloat(document.getElementById('modal_monto_pagar').value || 0);
-    if (isNaN(monto) || monto <= 0) {
-      e.preventDefault();
-      alert('Ingrese un monto válido para pagar');
-    }
-  });
-</script>
-
     <!-- PERÍODOS -->
     <div class="tab-pane fade <?= paneActive('periodos',$tab) ?>" id="periodos">
       <h6>Gestión de Períodos de Pago</h6>
@@ -1522,20 +1455,16 @@ include __DIR__ . '/../views/partials/navbar.php';
         <div class="col-md-6">
           <div class="card">
             <div class="card-body">
-              <h6 class="mb-3">Incidencias y Descuentos por período</h6>
-              <?php $periods_print = db()->query("SELECT * FROM payroll_periods ORDER BY fecha_inicio DESC LIMIT 50")->fetchAll(); ?>
+              <h6 class="mb-3">Incidencias y Descuentos por rango</h6>
               <form method="get" target="_blank">
                 <input type="hidden" name="print_periodo" value="1">
                 <div class="mb-2">
-                  <label class="form-label">Período</label>
-                  <select name="period_id" class="form-select" required>
-                    <option value="">— Seleccionar —</option>
-                    <?php foreach ($periods_print as $p): ?>
-                      <option value="<?= (int)$p['id'] ?>">
-                        #<?= (int)$p['id'] ?> — <?= e($p['fecha_inicio']) ?> a <?= e($p['fecha_fin']) ?> (<?= e($p['estado']) ?>)
-                      </option>
-                    <?php endforeach; ?>
-                  </select>
+                  <label class="form-label">Desde</label>
+                  <input type="date" name="desde" class="form-control" required>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label">Hasta</label>
+                  <input type="date" name="hasta" class="form-control" required>
                 </div>
                 <button class="btn btn-outline-primary">Imprimir A4</button>
               </form>
@@ -1547,5 +1476,82 @@ include __DIR__ . '/../views/partials/navbar.php';
 
   </div>
 </div>
+
+<!-- Modal: Pagar Nómina -->
+<div class="modal fade" id="pagarModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <form method="post" id="pagar-form">
+        <input type="hidden" name="action" value="registrar_nomina">
+        <input type="hidden" name="employee_id" id="modal_employee_id" value="">
+        <input type="hidden" name="fecha_pago" value="<?= date('Y-m-d') ?>">
+        <input type="hidden" name="sueldo_base" id="modal_sueldo_base" value="0">
+        <input type="hidden" name="descuentos_total" id="modal_descuentos" value="0">
+        <input type="hidden" name="adelantos_total" id="modal_adelantos" value="0">
+        <input type="hidden" name="prestamos_cuota" id="modal_prestamos" value="0">
+        <div class="modal-header">
+          <h5 class="modal-title">Pagar Nómina</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2"><strong id="modal_empname"></strong></div>
+          <div class="mb-2">Sueldo Base: <span id="modal_sueldo_text"></span></div>
+          <div class="mb-2">Horas Extras: <span id="modal_he_text"></span></div>
+          <div class="mb-2">Descuentos: <span id="modal_desc_text"></span></div>
+          <div class="mb-2">Adelantos: <span id="modal_adel_text"></span></div>
+          <div class="mb-2">Cuota Préstamo: <span id="modal_prest_text"></span></div>
+          <div class="mb-3">
+            <label class="form-label">Monto a pagar</label>
+            <input type="number" step="0.01" min="0" name="sueldo_neto" id="modal_monto_pagar" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">Confirmar pago</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  var pagarModal = document.getElementById('pagarModal');
+  if (pagarModal) {
+    pagarModal.addEventListener('show.bs.modal', function (event) {
+      var button = event.relatedTarget;
+      var empId = button.getAttribute('data-empid');
+      var empName = button.getAttribute('data-empname');
+      var sueldo = parseFloat(button.getAttribute('data-sueldo') || 0);
+      var horasExtras = parseFloat(button.getAttribute('data-horasextras') || 0);
+      var desc = parseFloat(button.getAttribute('data-descuentos') || 0);
+      var adel = parseFloat(button.getAttribute('data-adelantos') || 0);
+      var prest = parseFloat(button.getAttribute('data-prestamos') || 0);
+      var saldo = parseFloat(button.getAttribute('data-saldo') || 0);
+
+      document.getElementById('modal_employee_id').value = empId;
+      document.getElementById('modal_empname').textContent = empName;
+      document.getElementById('modal_sueldo_base').value = sueldo + horasExtras; // Include HE in base
+      document.getElementById('modal_descuentos').value = desc;
+      document.getElementById('modal_adelantos').value = adel;
+      document.getElementById('modal_prestamos').value = prest;
+
+      document.getElementById('modal_sueldo_text').textContent = sueldo.toFixed(2);
+      document.getElementById('modal_he_text').textContent = horasExtras.toFixed(2);
+      document.getElementById('modal_desc_text').textContent = desc.toFixed(2);
+      document.getElementById('modal_adel_text').textContent = adel.toFixed(2);
+      document.getElementById('modal_prest_text').textContent = prest.toFixed(2);
+      document.getElementById('modal_monto_pagar').value = saldo.toFixed(2);
+    });
+  }
+
+  // Opcional: validar antes de enviar
+  document.getElementById('pagar-form')?.addEventListener('submit', function(e){
+    var monto = parseFloat(document.getElementById('modal_monto_pagar').value || 0);
+    if (isNaN(monto) || monto <= 0) {
+      e.preventDefault();
+      alert('Ingrese un monto válido para pagar');
+    }
+  });
+</script>
 
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>

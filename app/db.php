@@ -10,7 +10,7 @@ function db(): PDO {
         $pass = getenv('DB_PASS') ?: 'PObitovi56';
         $dsn  = "mysql:host={$host};dbname={$db};charset=utf8mb4";
 
-        // $host = getenv('DB_HOST') ?: 'localhost';
+        // $host = getenv('DB_HOST') ?: 'localhost';   
         // $db   = getenv('DB_NAME') ?: 'erp_mvp';  
         // $user = getenv('DB_USER') ?: 'root';
         // $pass = getenv('DB_PASS') ?: '';
