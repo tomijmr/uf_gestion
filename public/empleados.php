@@ -276,18 +276,11 @@ try {
 } catch (Throwable $e) {
   // No bloquear ejecución si ALTER no funciona en versiones antiguas
 }
-// Asegurar columnas nuevas para asistencia (horario simple y horas extras)
+// Asegurar columnas nuevas para asistencia (ingreso mañana/tarde y horas extras)
 try {
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS ingreso_manana TIME NULL");
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS ingreso_tarde TIME NULL");
-  db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS horario_entrada VARCHAR(5) NULL");
-  db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS turno VARCHAR(10) NULL");
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS horas_extras DECIMAL(5,2) DEFAULT 0");
-  try {
-    db()->exec("CREATE UNIQUE INDEX uq_employee_attendance_turno ON employee_attendance (employee_id, fecha, turno)");
-  } catch (Throwable $e) {
-    // Ignorar si ya existe
-  }
 } catch (Throwable $e) {
   // Silenciar errores de compatibilidad
 }
@@ -336,12 +329,6 @@ function get_active_period() {
   $stmt = db()->prepare("SELECT * FROM payroll_periods WHERE estado='ACTIVO' ORDER BY fecha_inicio DESC LIMIT 1");
   $stmt->execute();
   return $stmt->fetch();
-}
-
-function get_current_week_range() {
-  $inicio = date('Y-m-d', strtotime('monday this week'));
-  $fin = date('Y-m-d', strtotime('sunday this week'));
-  return ['fecha_inicio' => $inicio, 'fecha_fin' => $fin];
 }
 
 function create_period_if_needed() {
@@ -499,11 +486,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if ($action === 'registrar_asistencia') {
     $emp_id = (int)($_POST['employee_id'] ?? 0);
     $fecha = trim($_POST['fecha'] ?? '');
-    $horario_entrada = trim($_POST['horario_entrada'] ?? '');
-    $ingreso_manana = trim($_POST['ingreso_manana'] ?? '');
-    $ingreso_tarde = trim($_POST['ingreso_tarde'] ?? '');
+    $presente = (int)($_POST['presente'] ?? 1);
+    $ingreso_manana = trim($_POST['ingreso_manana'] ?? '') ?: null;
+    $ingreso_tarde = trim($_POST['ingreso_tarde'] ?? '') ?: null;
     $horas_extras = max(0, (float)($_POST['horas_extras'] ?? 0));
-    $horarios_validos = ['8:00', '9:00', '08:00', '09:00', '14:00'];
+    $justificado = (int)($_POST['justificado'] ?? 0);
+    $notas = trim($_POST['notas'] ?? '');
 
     try {
       if ($emp_id <= 0) {
@@ -512,41 +500,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         throw new Exception('Selecciona un empleado.');
       }
       if ($fecha === '') throw new Exception('Selecciona una fecha.');
-      if ($ingreso_manana === '' && $ingreso_tarde === '') {
-        if (!in_array($horario_entrada, $horarios_validos, true)) {
-          throw new Exception('Selecciona un horario válido.');
-        }
-        if ($horario_entrada === '8:00') $horario_entrada = '08:00';
-        if ($horario_entrada === '9:00') $horario_entrada = '09:00';
 
-        $ingreso_manana = null;
-        $ingreso_tarde = null;
-        if ($horario_entrada === '14:00') {
-          $ingreso_tarde = '14:00';
-        } else {
-          $ingreso_manana = $horario_entrada;
-        }
-      } else {
-        if ($ingreso_manana !== '' && !in_array($ingreso_manana, ['08:00','09:00'], true)) {
-          throw new Exception('Horario de mañana inválido.');
-        }
-        if ($ingreso_tarde !== '' && $ingreso_tarde !== '14:00') {
-          throw new Exception('Horario de tarde inválido.');
-        }
-      }
-
-      $ingreso_manana = $ingreso_manana !== '' ? $ingreso_manana : null;
-      $ingreso_tarde = $ingreso_tarde !== '' ? $ingreso_tarde : null;
-
-      // Regla: 08:00 suma 4 horas regulares + 1 extra
-      if ($ingreso_manana === '08:00') {
-        $horas_extras += 1;
-      }
-
-      db()->prepare("INSERT INTO employee_attendance (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ingreso_manana = IF(VALUES(ingreso_manana) IS NOT NULL, VALUES(ingreso_manana), ingreso_manana), ingreso_tarde = IF(VALUES(ingreso_tarde) IS NOT NULL, VALUES(ingreso_tarde), ingreso_tarde), horas_extras = CASE WHEN VALUES(ingreso_manana) IS NOT NULL AND ingreso_manana IS NULL THEN horas_extras + VALUES(horas_extras) WHEN VALUES(ingreso_tarde) IS NOT NULL AND ingreso_tarde IS NULL THEN horas_extras + VALUES(horas_extras) ELSE VALUES(horas_extras) END")
-        ->execute([$emp_id, $fecha, $ingreso_manana, $ingreso_tarde, $horas_extras]);
+      db()->prepare("INSERT INTO employee_attendance (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras, presente, justificado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ingreso_manana=?, ingreso_tarde=?, horas_extras=?, presente=?, justificado=?, notas=?")
+        ->execute([$emp_id, $fecha, $ingreso_manana, $ingreso_tarde, $horas_extras, $presente, $justificado, $notas, $ingreso_manana, $ingreso_tarde, $horas_extras, $presente, $justificado, $notas]);
       $flash_ok = "Asistencia registrada.";
-      $tab = $_POST['tab'] ?? 'asistencia';
+      $tab = 'asistencia';
     } catch (Throwable $e) {
       $flash_err = 'Error: ' . $e->getMessage();
     }
@@ -651,8 +609,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // Obtener o crear el período activo
       $period = create_period_if_needed();
       
-      // Al registrar un pago, el saldo vuelve a 0
-      $estado = 'PAGADO';
+      // Calcular cuánto se debe EN ESTE PERÍODO (sin incluir saldo anterior)
+      $owed_this_period = $sueldo_base - $descuentos - $adelantos - $prestamos_cuota;
+      
+      // Calcular cuánto se ha pagado en total en este período
+      $stmt = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
+      $stmt->execute([$emp_id, $period['id']]);
+      $total_pagado_periodo = (float)($stmt->fetch()['total'] ?? 0);
+      
+      // Saldo del período actual = lo que debe este período - lo pagado hasta ahora - el pago actual
+      $saldo_periodo_actual = round($owed_this_period - $total_pagado_periodo - $sueldo_neto, 2);
+
+      $estado = $saldo_periodo_actual > 0 ? 'PENDIENTE' : 'PAGADO';
 
       $stmt = db()->prepare("INSERT INTO employee_payroll (employee_id, period_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       $stmt->execute([$emp_id, $period['id'], $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $estado, $notas]);
@@ -751,56 +719,41 @@ if ($selected_emp_id > 0) {
 
 // Calcular saldo semanal del empleado seleccionado
 $saldo_semanal = 0;
-$horas_regulares_total = 0;
-$horas_extras_total = 0;
-$total_horas = 0;
-$valor_hora = 0;
-$sueldo_base = 0;
-$descuentos_total = 0;
-$adelantos_total = 0;
-$prestamos_total = 0;
 if ($selected_employee) {
   try {
-    // Calcular base por horas trabajadas del período activo
-    $sueldo_base = 0;
+    // Usar pago semanal como base (si no tiene, usar 0)
+    $sueldo_base = (float)($selected_employee['pago_semanal'] ?? 0);
     
     // Si el empleado está suspendido o en licencia, el sueldo base es 0
     if ($selected_employee['suspendido'] || $selected_employee['en_licencia_medica']) {
       $sueldo_base = 0;
     }
     
-    // Calcular horas regulares y extras del período activo
+    // Calcular horas extras del período activo
     $period = get_active_period();
-    $period_range = $period ?: get_current_week_range();
     $horas_extras_total = 0;
-    $horas_regulares_total = 0;
-    $horas_extras_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $horas_extras_stmt->execute([$selected_emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $horas_extras_total = (float)($horas_extras_stmt->fetch()['total'] ?? 0);
-
-    $horas_reg_stmt = db()->prepare("SELECT COALESCE(SUM(
-        (CASE WHEN ingreso_manana IS NOT NULL AND ingreso_manana <> '' THEN 4 ELSE 0 END) +
-        (CASE WHEN ingreso_tarde IS NOT NULL AND ingreso_tarde <> '' THEN 4 ELSE 0 END)
-      ), 0) AS total
-      FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $horas_reg_stmt->execute([$selected_emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $horas_regulares_total = (float)($horas_reg_stmt->fetch()['total'] ?? 0);
-    $valor_hora = (float)($selected_employee['pago_por_hora'] ?? 0);
-    $total_horas = $horas_regulares_total + $horas_extras_total;
-    $sueldo_base = $valor_hora > 0 ? ($total_horas * $valor_hora) : (float)($selected_employee['pago_semanal'] ?? 0);
-    $pago_horas_extras = 0;
+    if ($period) {
+      $horas_extras_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $horas_extras_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $horas_extras_total = (float)($horas_extras_stmt->fetch()['total'] ?? 0);
+    }
+    $pago_horas_extras = $horas_extras_total * (float)($selected_employee['pago_por_hora'] ?? 0);
     
     $descuentos_total = 0;
-    $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $desc_stmt->execute([$selected_emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $descuentos_total = (float)($desc_stmt->fetch()['total'] ?? 0);
+    if ($period) {
+      $desc_stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $desc_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $descuentos_total = (float)($desc_stmt->fetch()['total'] ?? 0);
+    }
     
     $adelantos_total = 0;
-    $adelantos_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
-                                     FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
-                                     AND fecha_solicitud BETWEEN ? AND ?");
-    $adelantos_stmt->execute([$selected_emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $adelantos_total = (float)($adelantos_stmt->fetch()['total'] ?? 0);
+    if ($period) {
+      $adelantos_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
+                                       FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
+                                       AND fecha_solicitud BETWEEN ? AND ?");
+      $adelantos_stmt->execute([$selected_emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $adelantos_total = (float)($adelantos_stmt->fetch()['total'] ?? 0);
+    }
     
     $prestamos_stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");
     $prestamos_stmt->execute([$selected_emp_id]);
@@ -823,12 +776,7 @@ if ($selected_employee) {
       $pagos_periodo_actual = (float)($stmt_pagos->fetch()['total'] ?? 0);
     }
     
-    $saldo_semanal = round($sueldo_base - $descuentos_total - $adelantos_total - $prestamos_total, 2);
-
-    // Si hubo algún pago en el período, el saldo vuelve a 0
-    if ($period && $pagos_periodo_actual > 0) {
-      $saldo_semanal = 0;
-    }
+    $saldo_semanal = round($sueldo_base + $pago_horas_extras - $descuentos_total - $adelantos_total - $prestamos_total, 2);
   } catch (Throwable $e) {}
 }
 
@@ -838,80 +786,63 @@ try {
   // Primero, obtener lista de empleados
   $empleados_base = db()->query("SELECT id, nombre, apellido, pago_semanal, pago_por_hora, suspendido, en_licencia_medica FROM employees WHERE activo=1 ORDER BY nombre, apellido")->fetchAll();
   $period = get_active_period();
-  $period_range = $period ?: get_current_week_range();
   
   // Para cada empleado, calcular sus valores
   foreach ($empleados_base as $emp) {
     $emp_id = (int)$emp['id'];
     
-    // Calcular base por horas trabajadas
-    $sueldo_base = 0;
+    // Usar pago semanal como base
+    $sueldo_base = (float)($emp['pago_semanal'] ?? 0);
     
     // Si está suspendido o en licencia, no tiene sueldo base
     if ($emp['suspendido'] || $emp['en_licencia_medica']) {
       $sueldo_base = 0;
     }
     
-    // Horas regulares y extras del período activo
+    // Horas extras del período activo
     $horas_extras = 0;
-    $horas_regulares = 0;
-    $he_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total
-                              FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $he_stmt->execute([$emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $horas_extras = (float)($he_stmt->fetch()['total'] ?? 0);
-
-    $hr_stmt = db()->prepare("SELECT COALESCE(SUM(
-        (CASE WHEN ingreso_manana IS NOT NULL AND ingreso_manana <> '' THEN 4 ELSE 0 END) +
-        (CASE WHEN ingreso_tarde IS NOT NULL AND ingreso_tarde <> '' THEN 4 ELSE 0 END)
-      ), 0) AS total
-      FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $hr_stmt->execute([$emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $horas_regulares = (float)($hr_stmt->fetch()['total'] ?? 0);
-    $valor_hora = (float)($emp['pago_por_hora'] ?? 0);
-    $total_horas = $horas_regulares + $horas_extras;
-    $pago_horas_extras = 0;
-    $sueldo_base = $valor_hora > 0 ? ($total_horas * $valor_hora) : (float)($emp['pago_semanal'] ?? 0);
+    if ($period) {
+      $he_stmt = db()->prepare("SELECT COALESCE(SUM(horas_extras), 0) AS total
+                                FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $he_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $horas_extras = (float)($he_stmt->fetch()['total'] ?? 0);
+    }
+    $pago_horas_extras = $horas_extras * (float)($emp['pago_por_hora'] ?? 0);
     
     // Descuentos del período activo
     $descuentos = 0;
-    $desc_stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN monto_descuento ELSE 0 END), 0) AS total
-                                FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-    $desc_stmt->execute([$emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
+    if ($period) {
+      $desc_stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo IN ('DESCUENTO','FALTA','LLEGADA_TARDE') THEN monto_descuento ELSE 0 END), 0) AS total
+                                  FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $desc_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $descuentos = (float)($desc_stmt->fetch()['total'] ?? 0);
+    }
     
     // Adelantos del período activo
     $adelantos = 0;
-    $adel_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
-                                FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
-                                AND fecha_solicitud BETWEEN ? AND ?");
-    $adel_stmt->execute([$emp_id, $period_range['fecha_inicio'], $period_range['fecha_fin']]);
-    $adelantos = (float)($adel_stmt->fetch()['total'] ?? 0);
+    if ($period) {
+      $adel_stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total
+                                  FROM employee_advances WHERE employee_id=? AND estado='APROBADO'
+                                  AND fecha_solicitud BETWEEN ? AND ?");
+      $adel_stmt->execute([$emp_id, $period['fecha_inicio'], $period['fecha_fin']]);
+      $adelantos = (float)($adel_stmt->fetch()['total'] ?? 0);
+    }
     
     // Préstamos
     $prest = db()->query("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id={$emp_id} AND estado='APROBADO'")->fetch();
     $cuota_prestamo = (float)($prest['total'] ?? 0);
     
-    // Si hubo algún pago en el período, el saldo se considera 0
-    $pagos_periodo = 0;
-    if ($period) {
-      $stmt_pagos = db()->prepare("SELECT COALESCE(SUM(sueldo_neto), 0) as total FROM employee_payroll WHERE employee_id=? AND period_id=?");
-      $stmt_pagos->execute([$emp_id, $period['id']]);
-      $pagos_periodo = (float)($stmt_pagos->fetch()['total'] ?? 0);
-    }
-
     $resumen_empleados[] = [
       'id' => $emp_id,
       'nombre_completo' => $emp['nombre'] . ' ' . $emp['apellido'],
       'sueldo_base_semanal' => $sueldo_base,
       'pago_horas_extras' => $pago_horas_extras,
       'horas_extras' => $horas_extras,
-      'horas_regulares' => $horas_regulares,
       'descuentos' => $descuentos,
       'adelantos' => $adelantos,
       'cuota_prestamo' => $cuota_prestamo,
       'suspendido' => $emp['suspendido'],
-      'en_licencia' => $emp['en_licencia_medica'],
-      'pagos_periodo' => $pagos_periodo
+      'en_licencia' => $emp['en_licencia_medica']
     ];
   }
 } catch (Throwable $e) {
@@ -923,12 +854,9 @@ foreach ($resumen_empleados as &$emp) {
   try {
     // Saldo a pagar = base + horas extras - descuentos - adelantos - cuota préstamos
     $emp['saldo'] = round(
-      $emp['sueldo_base_semanal'] - $emp['descuentos'] - $emp['adelantos'] - $emp['cuota_prestamo'],
+      $emp['sueldo_base_semanal'] + $emp['pago_horas_extras'] - $emp['descuentos'] - $emp['adelantos'] - $emp['cuota_prestamo'],
       2
     );
-    if (!empty($emp['pagos_periodo']) && $emp['pagos_periodo'] > 0) {
-      $emp['saldo'] = 0;
-    }
   } catch (Throwable $e) { 
     error_log("Error calculando saldo: " . $e->getMessage());
     $emp['saldo'] = 0; 
@@ -1084,34 +1012,16 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div class="tab-pane fade <?= paneActive('asistencia',$tab) ?>" id="asistencia">
       <div class="row g-3">
         <div class="col-md-5">
-          <h6>Marcado de Asistencia</h6>
+          <h6>Registrar Asistencia</h6>
           <form method="post" class="border rounded p-3 bg-light">
             <input type="hidden" name="action" value="registrar_asistencia">
-            <div class="mb-2">
-              <label class="form-label">Empleado *</label>
-              <select name="employee_id" class="form-select" required>
-                <option value="">— Seleccionar —</option>
-                <?php foreach ($employees_list as $e): ?>
-                  <option value="<?= (int)$e['id'] ?>"><?= e($e['nombre_completo']) ?></option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Fecha *</label>
-              <input type="date" name="fecha" class="form-control" value="<?= date('Y-m-d') ?>" required>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Horario de entrada</label>
-              <select name="horario_entrada" class="form-select" required>
-                <option value="08:00">08:00</option>
-                <option value="09:00">09:00</option>
-                <option value="14:00">14:00</option>
-              </select>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Horas extra</label>
-              <input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0">
-            </div>
+            <div class="mb-2"><label class="form-label">Empleado *</label><select name="employee_id" class="form-select" required><option value="">— Seleccionar —</option><?php foreach ($employees_list as $e): ?><option value="<?= (int)$e['id'] ?>"><?= e($e['nombre_completo']) ?></option><?php endforeach; ?></select></div>
+            <div class="mb-2"><label class="form-label">Fecha *</label><input type="date" name="fecha" class="form-control" value="<?= date('Y-m-d') ?>" required></div>
+            <div class="mb-2"><label class="form-label">Ingreso Mañana</label><input type="time" name="ingreso_manana" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Ingreso Tarde</label><input type="time" name="ingreso_tarde" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Horas Extra</label><input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0"></div>
+            <div class="mb-2"><label><input type="hidden" name="presente" value="0"><input type="checkbox" name="presente" value="1" checked> Presente</label></div>
+            <div class="mb-3"><label class="form-label">Notas</label><textarea name="notas" class="form-control" rows="2"></textarea></div>
             <div class="d-grid"><button type="submit" class="btn btn-primary">Registrar</button></div>
           </form>
         </div>
@@ -1120,31 +1030,30 @@ include __DIR__ . '/../views/partials/navbar.php';
           <h6>Últimas Asistencias</h6>
           <div class="table-responsive">
             <table class="table table-sm align-middle">
-              <thead class="table-light"><tr><th>Empleado</th><th>Fecha</th><th>Turno</th><th>Horario</th><th>Horas extra</th></tr></thead>
+              <thead class="table-light"><tr><th>Empleado</th><th>Fecha</th><th>Ingreso Mañana</th><th>Ingreso Tarde</th><th>Horas Extra</th><th>Presente</th><th>Notas</th><th></th></tr></thead>
               <tbody>
                 <?php if (!$attendance_list): ?>
-                  <tr><td colspan="5" class="text-center text-muted py-3">Sin registros</td></tr>
-                <?php else: foreach ($attendance_list as $a): ?>
+                  <tr><td colspan="8" class="text-center text-muted py-3">Sin registros</td></tr>
+                <?php else: foreach ($attendance_list as $a): $formId = 'att-' . (int)$a['id']; ?>
                   <tr>
                     <td><?= e($a['empleado']) ?></td>
                     <td><?= e($a['fecha']) ?></td>
-                    <td>
-                      <?php
-                        $t = [];
-                        if (!empty($a['ingreso_manana'])) $t[] = 'Mañana';
-                        if (!empty($a['ingreso_tarde'])) $t[] = 'Tarde';
-                        echo e($t ? implode(' + ', $t) : '—');
-                      ?>
+                    <td><input type="time" name="ingreso_manana" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_manana'] ? e(substr($a['ingreso_manana'], 0, 5)) : '' ?>"></td>
+                    <td><input type="time" name="ingreso_tarde" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_tarde'] ? e(substr($a['ingreso_tarde'], 0, 5)) : '' ?>"></td>
+                    <td><input type="number" step="0.25" min="0" name="horas_extras" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e((string)($a['horas_extras'] ?? '0')) ?>"></td>
+                    <td class="text-center">
+                      <input type="hidden" name="presente" value="0" form="<?= $formId ?>">
+                      <input type="checkbox" name="presente" value="1" form="<?= $formId ?>" <?= $a['presente'] ? 'checked' : '' ?>>
                     </td>
-                    <td>
-                      <?php
-                        $h = [];
-                        if (!empty($a['ingreso_manana'])) $h[] = substr($a['ingreso_manana'], 0, 5);
-                        if (!empty($a['ingreso_tarde'])) $h[] = substr($a['ingreso_tarde'], 0, 5);
-                        echo e($h ? implode(' / ', $h) : '—');
-                      ?>
+                    <td><input type="text" name="notas" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e($a['notas'] ?? '') ?>" placeholder="Notas"></td>
+                    <td class="text-nowrap">
+                      <form id="<?= $formId ?>" method="post">
+                        <input type="hidden" name="action" value="registrar_asistencia">
+                        <input type="hidden" name="employee_id" value="<?= (int)$a['employee_id'] ?>">
+                        <input type="hidden" name="fecha" value="<?= e($a['fecha']) ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Guardar</button>
+                      </form>
                     </td>
-                    <td><?= e($a['horas_extras'] ?? '0') ?></td>
                   </tr>
                 <?php endforeach; endif; ?>
               </tbody>
@@ -1216,93 +1125,6 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <?php endif; ?>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div class="row g-3 mb-3">
-            <div class="col-md-6">
-              <h6>Asistencia del día (Legajo)</h6>
-              <form method="post" class="border rounded p-3 bg-light">
-                <input type="hidden" name="action" value="registrar_asistencia">
-                <input type="hidden" name="tab" value="movimientos">
-                <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
-                <div class="mb-2">
-                  <label class="form-label">Fecha *</label>
-                  <input type="date" name="fecha" class="form-control" value="<?= date('Y-m-d') ?>" required>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label">Turno mañana</label>
-                  <select name="ingreso_manana" class="form-select">
-                    <option value="">— Sin marcar —</option>
-                    <option value="08:00">08:00</option>
-                    <option value="09:00">09:00</option>
-                  </select>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label">Turno tarde</label>
-                  <select name="ingreso_tarde" class="form-select">
-                    <option value="">— Sin marcar —</option>
-                    <option value="14:00">14:00</option>
-                  </select>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label">Horas extra adicionales</label>
-                  <input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0">
-                </div>
-                <div class="d-grid"><button type="submit" class="btn btn-primary">Registrar asistencia</button></div>
-              </form>
-            </div>
-
-            <div class="col-md-6">
-              <h6>Pago semanal (Legajo)</h6>
-              <form method="post" class="border rounded p-3 bg-light">
-                <input type="hidden" name="action" value="registrar_nomina">
-                <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
-                <input type="hidden" name="fecha_pago" value="<?= date('Y-m-d') ?>">
-                <input type="hidden" name="sueldo_base" value="<?= (float)$sueldo_base ?>">
-                <input type="hidden" name="descuentos_total" value="<?= (float)$descuentos_total ?>">
-                <input type="hidden" name="adelantos_total" value="<?= (float)$adelantos_total ?>">
-                <input type="hidden" name="prestamos_cuota" value="<?= (float)$prestamos_total ?>">
-                <div class="mb-2 small text-muted">Horas totales: <strong><?= number_format($total_horas, 2) ?></strong> — Valor hora: <strong><?= money($valor_hora) ?></strong></div>
-                <div class="mb-2 small text-muted">Bruto: <strong><?= money($sueldo_base) ?></strong> — Descuentos: <strong><?= money($descuentos_total) ?></strong></div>
-                <div class="mb-2 small text-muted">Adelantos: <strong><?= money($adelantos_total) ?></strong> — Préstamos: <strong><?= money($prestamos_total) ?></strong></div>
-                <div class="mb-3">Total a pagar: <strong><?= money($saldo_semanal) ?></strong></div>
-                <div class="mb-2">
-                  <label class="form-label">Medio de pago</label>
-                  <select name="medio_pago" class="form-select">
-                    <option value="EFECTIVO">Efectivo</option>
-                    <option value="TRANSFERENCIA">Transferencia</option>
-                  </select>
-                </div>
-                <div class="mb-2">
-                  <label class="form-label">Monto a pagar</label>
-                  <input type="number" step="0.01" min="0" name="sueldo_neto" class="form-control" value="<?= (float)$saldo_semanal ?>">
-                </div>
-                <div class="d-grid"><button type="submit" class="btn btn-success">Registrar pago</button></div>
-              </form>
-            </div>
-          </div>
-
-          <?php
-            $asistencia_hoy = null;
-            try {
-              $stmt_as = db()->prepare("SELECT * FROM employee_attendance WHERE employee_id=? AND fecha=? LIMIT 1");
-              $stmt_as->execute([$selected_emp_id, date('Y-m-d')]);
-              $asistencia_hoy = $stmt_as->fetch();
-            } catch (Throwable $e) {}
-          ?>
-          <div class="card mb-3">
-            <div class="card-body small">
-              <h6 class="mb-2">Asistencia del día registrada</h6>
-              <?php if (!$asistencia_hoy): ?>
-                <div class="text-muted">No hay asistencia registrada para hoy.</div>
-              <?php else: ?>
-                <div class="row g-2">
-                  <div class="col-md-4"><strong>Mañana:</strong> <?= $asistencia_hoy['ingreso_manana'] ? e(substr($asistencia_hoy['ingreso_manana'], 0, 5)) : '—' ?></div>
-                  <div class="col-md-4"><strong>Tarde:</strong> <?= $asistencia_hoy['ingreso_tarde'] ? e(substr($asistencia_hoy['ingreso_tarde'], 0, 5)) : '—' ?></div>
-                  <div class="col-md-4"><strong>Horas extra:</strong> <?= e((string)($asistencia_hoy['horas_extras'] ?? 0)) ?></div>
-                </div>
-              <?php endif; ?>
             </div>
           </div>
 
@@ -1416,7 +1238,6 @@ include __DIR__ . '/../views/partials/navbar.php';
             <tr>
               <th>Empleado</th>
               <th>Sueldo Base</th>
-              <th>Horas Reg.</th>
               <th>Horas Extras</th>
               <th>Pago H.E.</th>
               <th>Descuentos</th>
@@ -1429,7 +1250,7 @@ include __DIR__ . '/../views/partials/navbar.php';
           </thead>
           <tbody>
             <?php if (!$resumen_empleados): ?>
-              <tr><td colspan="11" class="text-center text-muted py-3">Sin empleados</td></tr>
+              <tr><td colspan="10" class="text-center text-muted py-3">Sin empleados</td></tr>
             <?php else: foreach ($resumen_empleados as $emp): 
               $estado_badge = '';
               if ($emp['suspendido']) $estado_badge = '<span class="badge bg-danger">Suspendido</span>';
@@ -1440,7 +1261,6 @@ include __DIR__ . '/../views/partials/navbar.php';
               <tr>
                 <td><?= e($emp['nombre_completo']) ?></td>
                 <td><?= money($emp['sueldo_base_semanal']) ?></td>
-                <td><?= number_format($emp['horas_regulares'], 2) ?> hs</td>
                 <td><?= number_format($emp['horas_extras'], 2) ?> hs</td>
                 <td><?= money($emp['pago_horas_extras']) ?></td>
                 <td><?= money($emp['descuentos']) ?></td>
@@ -1452,21 +1272,6 @@ include __DIR__ . '/../views/partials/navbar.php';
               </tr>
             <?php endforeach; endif; ?>
           </tbody>
-          <?php if ($resumen_empleados): ?>
-          <tfoot class="table-light fw-bold">
-            <?php
-              $total_pagar = 0;
-              foreach ($resumen_empleados as $emp) {
-                $total_pagar += (float)($emp['saldo'] ?? 0);
-              }
-            ?>
-            <tr>
-              <td colspan="9">TOTAL A PAGAR</td>
-              <td class="text-end" style="color: <?= $total_pagar >= 0 ? 'green' : 'red' ?>"><?= money($total_pagar) ?></td>
-              <td></td>
-            </tr>
-          </tfoot>
-          <?php endif; ?>
         </table>
       </div>
     </div>
@@ -1706,7 +1511,7 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
       </form>
     </div>
-  </div>  
+  </div>
 </div>
 
 <script>
