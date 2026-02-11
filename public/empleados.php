@@ -32,7 +32,15 @@ if (isset($_GET['print_legajo']) && isset($_GET['emp_id'])) {
   $stmt->execute([$emp_id]);
   $incidencias = $stmt->fetchAll() ?: [];
 
-  $movimientos = array_merge($descuentos, $adelantos, $prestamos, $incidencias);
+  $stmt = db()->prepare("SELECT 'ASISTENCIA' AS tipo, fecha, horas_trabajadas AS monto, CONCAT('Asistencia: ', IFNULL(horas_trabajadas,0), ' hs') AS detalle FROM employee_attendance WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $asistencias = $stmt->fetchAll() ?: [];
+
+  $stmt = db()->prepare("SELECT 'PAGO' AS tipo, fecha_pago AS fecha, sueldo_neto AS monto, CONCAT('Pago nomina - ', estado) AS detalle FROM employee_payroll WHERE employee_id=?");
+  $stmt->execute([$emp_id]);
+  $pagos = $stmt->fetchAll() ?: [];
+
+  $movimientos = array_merge($descuentos, $adelantos, $prestamos, $incidencias, $asistencias, $pagos);
   usort($movimientos, fn($a, $b) => strtotime($b['fecha']) <=> strtotime($a['fecha']));
 
   $logo = url('favicon-96x96.png');
@@ -96,7 +104,15 @@ if (isset($_GET['print_legajo']) && isset($_GET['emp_id'])) {
               <td><?= e($m['fecha']) ?></td>
               <td><?= e($m['tipo']) ?></td>
               <td><?= e($m['detalle'] ?? '') ?></td>
-              <td class="text-end"><?= $m['monto'] ? money($m['monto']) : '—' ?></td>
+              <td class="text-end">
+                <?php if ($m['tipo'] === 'INCIDENCIA'): ?>
+                  —
+                <?php elseif ($m['tipo'] === 'ASISTENCIA'): ?>
+                  <?= e(number_format((float)($m['monto'] ?? 0), 2, '.', '')) ?> hs
+                <?php else: ?>
+                  <?= $m['monto'] ? money($m['monto']) : '—' ?>
+                <?php endif; ?>
+              </td>
             </tr>
           <?php endforeach; endif; ?>
         </tbody>
@@ -632,8 +648,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $stmt = db()->prepare("INSERT INTO employee_payroll (employee_id, period_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       $stmt->execute([$emp_id, $period['id'], $fecha_pago, $semana_inicio ?: null, $semana_fin ?: null, $sueldo_base, $descuentos, $adelantos, $prestamos_cuota, $sueldo_neto, $medio_pago, $estado, $notas]);
 
-      // NO actualizar saldo_pendiente aquí - se calcula dinámicamente en la vista
-      // El saldo_pendiente se actualiza SOLO al cerrar el período
+      // Guardar saldo pendiente si el pago no cubre el total
+      $saldo_pendiente = $saldo_periodo_actual > 0 ? $saldo_periodo_actual : 0;
+      db()->prepare("UPDATE employees SET saldo_pendiente=? WHERE id=?")
+        ->execute([$saldo_pendiente, $emp_id]);
+
+      // Si se paga el total de horas * precio hora, reiniciar horas trabajadas (sin períodos)
+      $stmt = db()->prepare("SELECT COALESCE(SUM(COALESCE(horas_trabajadas, (CASE WHEN NULLIF(ingreso_manana,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_tarde,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_manana,'') LIKE '08:00%' THEN 1 ELSE 0 END) + COALESCE(horas_extras,0))), 0) AS total FROM employee_attendance WHERE employee_id=?");
+      $stmt->execute([$emp_id]);
+      $total_horas_actual = (float)($stmt->fetch()['total'] ?? 0);
+      $stmt = db()->prepare("SELECT pago_por_hora FROM employees WHERE id=?");
+      $stmt->execute([$emp_id]);
+      $valor_hora_actual = (float)($stmt->fetch()['pago_por_hora'] ?? 0);
+      $total_a_pagar_horas = round($total_horas_actual * $valor_hora_actual, 2);
+      if (abs($sueldo_neto - $total_a_pagar_horas) <= 0.01) {
+        db()->prepare("UPDATE employee_attendance SET horas_trabajadas=0 WHERE employee_id=?")
+          ->execute([$emp_id]);
+      }
 
       // Marcar adelantos como descontados sólo si el pago cubre los adelantos registrados
       if ($sueldo_neto >= $adelantos) {
@@ -825,10 +856,20 @@ if ($selected_employee) {
       $stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
       $stmt->execute([$selected_emp_id, $legajo_period_inicio, $legajo_period_fin]);
       $legajo_descuentos = (float)($stmt->fetch()['total'] ?? 0);
+      if ($legajo_descuentos <= 0) {
+        $stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=?");
+        $stmt->execute([$selected_emp_id]);
+        $legajo_descuentos = (float)($stmt->fetch()['total'] ?? 0);
+      }
 
       $stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id=? AND estado='APROBADO' AND fecha_solicitud BETWEEN ? AND ?");
       $stmt->execute([$selected_emp_id, $legajo_period_inicio, $legajo_period_fin]);
       $legajo_adelantos = (float)($stmt->fetch()['total'] ?? 0);
+      if ($legajo_adelantos <= 0) {
+        $stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id=? AND estado='APROBADO'");
+        $stmt->execute([$selected_emp_id]);
+        $legajo_adelantos = (float)($stmt->fetch()['total'] ?? 0);
+      }
     }
 
     $stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");

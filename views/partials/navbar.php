@@ -24,6 +24,7 @@ $MENU = [
   ['label' => 'Materiales',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Maquinas',            'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
   ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO','RRHH']],
+  ['label' => 'Stock MP',            'href' => url('materias_primas_stock.php'), 'roles' => ['ADMIN','DEPOSITO','RRHH']],
  # ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
   ['label' => 'Producción',    'href' => url('panel_produccion.php'),     'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
   ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA','RRHH']],
