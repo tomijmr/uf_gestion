@@ -281,6 +281,7 @@ try {
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS ingreso_manana TIME NULL");
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS ingreso_tarde TIME NULL");
   db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS horas_extras DECIMAL(5,2) DEFAULT 0");
+  db()->exec("ALTER TABLE employee_attendance ADD COLUMN IF NOT EXISTS horas_trabajadas DECIMAL(5,2) DEFAULT 0");
 } catch (Throwable $e) {
   // Silenciar errores de compatibilidad
 }
@@ -358,13 +359,13 @@ function get_employee_period_balance($employee_id, $period_id) {
   return ['pagado' => $pagado, 'saldo_anterior' => $saldo_anterior];
 }
 
-$validTabs = ['empleados','asistencia','movimientos','resumen','nomina','periodos','impresiones'];
+$validTabs = ['empleados','movimientos','resumen','nomina','periodos','impresiones'];
 $tab = $_GET['tab'] ?? 'empleados';
 
 // Si es RRHH, solo permitir asistencia e incidencias (movimientos)
 if ($is_rrhh_only) {
-  $validTabs = ['asistencia', 'movimientos', 'impresiones'];
-  $tab = in_array($tab, $validTabs, true) ? $tab : 'asistencia';
+  $validTabs = ['movimientos', 'impresiones'];
+  $tab = in_array($tab, $validTabs, true) ? $tab : 'movimientos';
 }
 
 if (!in_array($tab, $validTabs, true)) $tab = 'empleados';
@@ -492,6 +493,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $horas_extras = max(0, (float)($_POST['horas_extras'] ?? 0));
     $justificado = (int)($_POST['justificado'] ?? 0);
     $notas = trim($_POST['notas'] ?? '');
+    $base_horas = 0;
+    if ($ingreso_manana) $base_horas += 4;
+    if ($ingreso_tarde) $base_horas += 4;
+    $extra_0800 = ($ingreso_manana && substr($ingreso_manana, 0, 5) === '08:00') ? 1 : 0;
+    $horas_trabajadas = round($base_horas + $extra_0800 + $horas_extras, 2);
 
     try {
       if ($emp_id <= 0) {
@@ -501,10 +507,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
       if ($fecha === '') throw new Exception('Selecciona una fecha.');
 
-      db()->prepare("INSERT INTO employee_attendance (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras, presente, justificado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ingreso_manana=?, ingreso_tarde=?, horas_extras=?, presente=?, justificado=?, notas=?")
-        ->execute([$emp_id, $fecha, $ingreso_manana, $ingreso_tarde, $horas_extras, $presente, $justificado, $notas, $ingreso_manana, $ingreso_tarde, $horas_extras, $presente, $justificado, $notas]);
+      db()->prepare("INSERT INTO employee_attendance (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras, horas_trabajadas, presente, justificado, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE ingreso_manana=?, ingreso_tarde=?, horas_extras=?, horas_trabajadas=?, presente=?, justificado=?, notas=?")
+        ->execute([$emp_id, $fecha, $ingreso_manana, $ingreso_tarde, $horas_extras, $horas_trabajadas, $presente, $justificado, $notas, $ingreso_manana, $ingreso_tarde, $horas_extras, $horas_trabajadas, $presente, $justificado, $notas]);
       $flash_ok = "Asistencia registrada.";
-      $tab = 'asistencia';
+      $tab = 'movimientos';
+      $selected_emp_id = $emp_id;
     } catch (Throwable $e) {
       $flash_err = 'Error: ' . $e->getMessage();
     }
@@ -704,8 +711,12 @@ if ($selected_emp_id > 0) {
     $stmt = db()->prepare("SELECT 'INCIDENCIA' AS tipo, id, fecha, 0 AS monto, CONCAT(tipo, ' - ', gravedad, ': ', descripcion) AS detalle, gravedad FROM employee_incidents WHERE employee_id=? ORDER BY fecha DESC");
     $stmt->execute([$selected_emp_id]);
     $incidencias = $stmt->fetchAll() ?: [];
+
+    $stmt = db()->prepare("SELECT 'ASISTENCIA' AS tipo, id, fecha, horas_trabajadas AS monto, CONCAT('Asistencia: ', IFNULL(horas_trabajadas,0), ' hs') AS detalle FROM employee_attendance WHERE employee_id=? ORDER BY fecha DESC");
+    $stmt->execute([$selected_emp_id]);
+    $asistencias = $stmt->fetchAll() ?: [];
     
-    $movimientos = array_merge($descuentos, $adelantos, $prestamos, $pagos, $incidencias);
+    $movimientos = array_merge($descuentos, $adelantos, $prestamos, $pagos, $incidencias, $asistencias);
     usort($movimientos, function($a, $b) { 
       $dateA = strtotime($a['fecha'] ?? '0000-00-00');
       $dateB = strtotime($b['fecha'] ?? '0000-00-00');
@@ -777,6 +788,58 @@ if ($selected_employee) {
     }
     
     $saldo_semanal = round($sueldo_base + $pago_horas_extras - $descuentos_total - $adelantos_total - $prestamos_total, 2);
+  } catch (Throwable $e) {}
+}
+
+// Datos de nómina para legajo (por horas del período activo)
+$legajo_period = null;
+$legajo_period_inicio = '';
+$legajo_period_fin = '';
+$legajo_total_horas = 0;
+$legajo_valor_hora = 0;
+$legajo_sueldo_base = 0;
+$legajo_descuentos = 0;
+$legajo_adelantos = 0;
+$legajo_prestamos = 0;
+$legajo_saldo_pagar = 0;
+if ($selected_employee) {
+  try {
+    $legajo_period = get_active_period();
+    if ($legajo_period) {
+      $legajo_period_inicio = $legajo_period['fecha_inicio'] ?? '';
+      $legajo_period_fin = $legajo_period['fecha_fin'] ?? '';
+    }
+
+    $legajo_valor_hora = (float)($selected_employee['pago_por_hora'] ?? 0);
+
+    if ($legajo_period && $selected_emp_id > 0) {
+      $stmt = db()->prepare("SELECT COALESCE(SUM(COALESCE(horas_trabajadas, (CASE WHEN NULLIF(ingreso_manana,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_tarde,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_manana,'') LIKE '08:00%' THEN 1 ELSE 0 END) + COALESCE(horas_extras,0))), 0) AS total FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $stmt->execute([$selected_emp_id, $legajo_period_inicio, $legajo_period_fin]);
+      $legajo_total_horas = (float)($stmt->fetch()['total'] ?? 0);
+      if ($legajo_total_horas <= 0) {
+        $stmt = db()->prepare("SELECT COALESCE(SUM(COALESCE(horas_trabajadas, (CASE WHEN NULLIF(ingreso_manana,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_tarde,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_manana,'') LIKE '08:00%' THEN 1 ELSE 0 END) + COALESCE(horas_extras,0))), 0) AS total FROM employee_attendance WHERE employee_id=?");
+        $stmt->execute([$selected_emp_id]);
+        $legajo_total_horas = (float)($stmt->fetch()['total'] ?? 0);
+      }
+
+      $stmt = db()->prepare("SELECT COALESCE(SUM(monto_descuento), 0) AS total FROM employee_discounts WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+      $stmt->execute([$selected_emp_id, $legajo_period_inicio, $legajo_period_fin]);
+      $legajo_descuentos = (float)($stmt->fetch()['total'] ?? 0);
+
+      $stmt = db()->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM employee_advances WHERE employee_id=? AND estado='APROBADO' AND fecha_solicitud BETWEEN ? AND ?");
+      $stmt->execute([$selected_emp_id, $legajo_period_inicio, $legajo_period_fin]);
+      $legajo_adelantos = (float)($stmt->fetch()['total'] ?? 0);
+    }
+
+    $stmt = db()->prepare("SELECT COALESCE(SUM(monto_aprobado / cuotas_cantidad), 0) AS total FROM employee_loans WHERE employee_id=? AND estado='APROBADO'");
+    $stmt->execute([$selected_emp_id]);
+    $legajo_prestamos = (float)($stmt->fetch()['total'] ?? 0);
+
+    $legajo_sueldo_base = round($legajo_total_horas * $legajo_valor_hora, 2);
+    if ($selected_employee['suspendido'] || $selected_employee['en_licencia_medica']) {
+      $legajo_sueldo_base = 0;
+    }
+    $legajo_saldo_pagar = round($legajo_sueldo_base - $legajo_descuentos - $legajo_adelantos - $legajo_prestamos, 2);
   } catch (Throwable $e) {}
 }
 
@@ -864,9 +927,13 @@ foreach ($resumen_empleados as &$emp) {
 }
 unset($emp); // Romper referencia para evitar corrupción en loops siguientes
 
-$attendance_list = [];
+$attendance_list_emp = [];
 try {
-  $attendance_list = db()->query("SELECT a.*, CONCAT(e.nombre,' ',e.apellido) AS empleado FROM employee_attendance a JOIN employees e ON e.id=a.employee_id ORDER BY a.fecha DESC, a.id DESC LIMIT 100")->fetchAll();
+  if ($selected_emp_id > 0) {
+    $stmt = db()->prepare("SELECT a.* FROM employee_attendance a WHERE a.employee_id=? ORDER BY a.fecha DESC, a.id DESC LIMIT 60");
+    $stmt->execute([$selected_emp_id]);
+    $attendance_list_emp = $stmt->fetchAll();
+  }
 } catch (Throwable $e) {}
 
 $payroll_list = [];
@@ -921,7 +988,6 @@ include __DIR__ . '/../views/partials/navbar.php';
     <?php if (!$is_rrhh_only): ?>
     <li class="nav-item"><button class="nav-link <?= tabActive('empleados',$tab) ?>" data-bs-toggle="tab" data-bs-target="#empleados" type="button">Empleados</button></li>
     <?php endif; ?>
-    <li class="nav-item"><button class="nav-link <?= tabActive('asistencia',$tab) ?>" data-bs-toggle="tab" data-bs-target="#asistencia" type="button">Asistencia</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('movimientos',$tab) ?>" data-bs-toggle="tab" data-bs-target="#movimientos" type="button">Legajo</button></li>
     <li class="nav-item"><button class="nav-link <?= tabActive('impresiones',$tab) ?>" data-bs-toggle="tab" data-bs-target="#impresiones" type="button">Impresiones</button></li>
     <?php if (!$is_rrhh_only): ?>
@@ -1008,61 +1074,6 @@ include __DIR__ . '/../views/partials/navbar.php';
       </div>
     </div>
 
-    <!-- ASISTENCIA -->
-    <div class="tab-pane fade <?= paneActive('asistencia',$tab) ?>" id="asistencia">
-      <div class="row g-3">
-        <div class="col-md-5">
-          <h6>Registrar Asistencia</h6>
-          <form method="post" class="border rounded p-3 bg-light">
-            <input type="hidden" name="action" value="registrar_asistencia">
-            <div class="mb-2"><label class="form-label">Empleado *</label><select name="employee_id" class="form-select" required><option value="">— Seleccionar —</option><?php foreach ($employees_list as $e): ?><option value="<?= (int)$e['id'] ?>"><?= e($e['nombre_completo']) ?></option><?php endforeach; ?></select></div>
-            <div class="mb-2"><label class="form-label">Fecha *</label><input type="date" name="fecha" class="form-control" value="<?= date('Y-m-d') ?>" required></div>
-            <div class="mb-2"><label class="form-label">Ingreso Mañana</label><input type="time" name="ingreso_manana" class="form-control"></div>
-            <div class="mb-2"><label class="form-label">Ingreso Tarde</label><input type="time" name="ingreso_tarde" class="form-control"></div>
-            <div class="mb-2"><label class="form-label">Horas Extra</label><input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0"></div>
-            <div class="mb-2"><label><input type="hidden" name="presente" value="0"><input type="checkbox" name="presente" value="1" checked> Presente</label></div>
-            <div class="mb-3"><label class="form-label">Notas</label><textarea name="notas" class="form-control" rows="2"></textarea></div>
-            <div class="d-grid"><button type="submit" class="btn btn-primary">Registrar</button></div>
-          </form>
-        </div>
-
-        <div class="col-md-7">
-          <h6>Últimas Asistencias</h6>
-          <div class="table-responsive">
-            <table class="table table-sm align-middle">
-              <thead class="table-light"><tr><th>Empleado</th><th>Fecha</th><th>Ingreso Mañana</th><th>Ingreso Tarde</th><th>Horas Extra</th><th>Presente</th><th>Notas</th><th></th></tr></thead>
-              <tbody>
-                <?php if (!$attendance_list): ?>
-                  <tr><td colspan="8" class="text-center text-muted py-3">Sin registros</td></tr>
-                <?php else: foreach ($attendance_list as $a): $formId = 'att-' . (int)$a['id']; ?>
-                  <tr>
-                    <td><?= e($a['empleado']) ?></td>
-                    <td><?= e($a['fecha']) ?></td>
-                    <td><input type="time" name="ingreso_manana" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_manana'] ? e(substr($a['ingreso_manana'], 0, 5)) : '' ?>"></td>
-                    <td><input type="time" name="ingreso_tarde" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_tarde'] ? e(substr($a['ingreso_tarde'], 0, 5)) : '' ?>"></td>
-                    <td><input type="number" step="0.25" min="0" name="horas_extras" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e((string)($a['horas_extras'] ?? '0')) ?>"></td>
-                    <td class="text-center">
-                      <input type="hidden" name="presente" value="0" form="<?= $formId ?>">
-                      <input type="checkbox" name="presente" value="1" form="<?= $formId ?>" <?= $a['presente'] ? 'checked' : '' ?>>
-                    </td>
-                    <td><input type="text" name="notas" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e($a['notas'] ?? '') ?>" placeholder="Notas"></td>
-                    <td class="text-nowrap">
-                      <form id="<?= $formId ?>" method="post">
-                        <input type="hidden" name="action" value="registrar_asistencia">
-                        <input type="hidden" name="employee_id" value="<?= (int)$a['employee_id'] ?>">
-                        <input type="hidden" name="fecha" value="<?= e($a['fecha']) ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-primary">Guardar</button>
-                      </form>
-                    </td>
-                  </tr>
-                <?php endforeach; endif; ?>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- MOVIMIENTOS -->
     <div class="tab-pane fade <?= paneActive('movimientos',$tab) ?>" id="movimientos">
       <div class="mb-3">
@@ -1124,6 +1135,162 @@ include __DIR__ . '/../views/partials/navbar.php';
                     <div><strong>Motivo:</strong> <?= e($selected_employee['motivo_licencia'] ?? '—') ?></div>
                   <?php endif; ?>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <h6>Registrar Asistencia</h6>
+              <form method="post" class="border rounded p-3 bg-light">
+                <input type="hidden" name="action" value="registrar_asistencia">
+                <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
+                <div class="mb-2"><label class="form-label">Fecha *</label><input type="date" name="fecha" class="form-control" value="<?= date('Y-m-d') ?>" required></div>
+                <div class="mb-2"><label class="form-label">Ingreso Mañana</label><input type="time" name="ingreso_manana" class="form-control"></div>
+                <div class="mb-2"><label class="form-label">Ingreso Tarde</label><input type="time" name="ingreso_tarde" class="form-control"></div>
+                <div class="mb-2"><label class="form-label">Horas Extra</label><input type="number" step="0.25" min="0" name="horas_extras" class="form-control" placeholder="0"></div>
+                <div class="mb-2"><label><input type="hidden" name="presente" value="0"><input type="checkbox" name="presente" value="1" checked> Presente</label></div>
+                <div class="mb-3"><label class="form-label">Notas</label><textarea name="notas" class="form-control" rows="2"></textarea></div>
+                <div class="d-grid"><button type="submit" class="btn btn-primary btn-sm">Registrar</button></div>
+              </form>
+            </div>
+
+            <div class="col-md-8">
+              <h6>Asistencias del empleado</h6>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead class="table-light"><tr><th>Fecha</th><th>Ingreso Mañana</th><th>Ingreso Tarde</th><th>Horas Extra</th><th>Horas</th><th>Presente</th><th>Notas</th><th></th></tr></thead>
+                  <tbody>
+                    <?php if (!$attendance_list_emp): ?>
+                      <tr><td colspan="8" class="text-center text-muted py-3">Sin registros</td></tr>
+                    <?php else: foreach ($attendance_list_emp as $a): $formId = 'att-' . (int)$a['id'];
+                      $base_h = 0;
+                      if ($a['ingreso_manana']) $base_h += 4;
+                      if ($a['ingreso_tarde']) $base_h += 4;
+                      $extra_0800 = ($a['ingreso_manana'] && substr($a['ingreso_manana'], 0, 5) === '08:00') ? 1 : 0;
+                      $horas_calc = round($base_h + $extra_0800 + (float)($a['horas_extras'] ?? 0), 2);
+                      $horas_show = $a['horas_trabajadas'] !== null ? (float)$a['horas_trabajadas'] : $horas_calc;
+                    ?>
+                      <tr>
+                        <td><?= e($a['fecha']) ?></td>
+                        <td><input type="time" name="ingreso_manana" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_manana'] ? e(substr($a['ingreso_manana'], 0, 5)) : '' ?>"></td>
+                        <td><input type="time" name="ingreso_tarde" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= $a['ingreso_tarde'] ? e(substr($a['ingreso_tarde'], 0, 5)) : '' ?>"></td>
+                        <td><input type="number" step="0.25" min="0" name="horas_extras" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e((string)($a['horas_extras'] ?? '0')) ?>"></td>
+                        <td class="text-center"><span class="badge bg-secondary"><?= e(number_format($horas_show, 2, '.', '')) ?></span></td>
+                        <td class="text-center">
+                          <input type="hidden" name="presente" value="0" form="<?= $formId ?>">
+                          <input type="checkbox" name="presente" value="1" form="<?= $formId ?>" <?= $a['presente'] ? 'checked' : '' ?>>
+                        </td>
+                        <td><input type="text" name="notas" form="<?= $formId ?>" class="form-control form-control-sm" value="<?= e($a['notas'] ?? '') ?>" placeholder="Notas"></td>
+                        <td class="text-nowrap">
+                          <form id="<?= $formId ?>" method="post">
+                            <input type="hidden" name="action" value="registrar_asistencia">
+                            <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
+                            <input type="hidden" name="fecha" value="<?= e($a['fecha']) ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Guardar</button>
+                          </form>
+                        </td>
+                      </tr>
+                    <?php endforeach; endif; ?>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-12">
+              <h6>Pagar Nómina (Legajo)</h6>
+              <?php $disable_pago = ($selected_employee['suspendido'] || $selected_employee['en_licencia_medica'] || $legajo_valor_hora <= 0); ?>
+              <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#pagarModalLegajo" <?= $disable_pago ? 'disabled' : '' ?>>Pagar</button>
+              <div class="small text-muted mt-2">
+                Saldo a pagar: <?= e(money($legajo_saldo_pagar)) ?>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal: Pagar Nómina (Legajo) -->
+          <div class="modal fade" id="pagarModalLegajo" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+              <div class="modal-content">
+                <form method="post">
+                  <input type="hidden" name="action" value="registrar_nomina">
+                  <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
+                  <input type="hidden" name="semana_inicio" value="<?= e($legajo_period_inicio) ?>">
+                  <input type="hidden" name="semana_fin" value="<?= e($legajo_period_fin) ?>">
+                  <input type="hidden" name="sueldo_base" value="<?= e(number_format($legajo_sueldo_base, 2, '.', '')) ?>">
+                  <input type="hidden" name="descuentos_total" value="<?= e(number_format($legajo_descuentos, 2, '.', '')) ?>">
+                  <input type="hidden" name="adelantos_total" value="<?= e(number_format($legajo_adelantos, 2, '.', '')) ?>">
+                  <input type="hidden" name="prestamos_cuota" value="<?= e(number_format($legajo_prestamos, 2, '.', '')) ?>">
+
+                  <div class="modal-header">
+                    <h5 class="modal-title">Pagar Nómina - <?= e($selected_employee['nombre'] . ' ' . $selected_employee['apellido']) ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <div class="row g-3">
+                      <div class="col-md-4">
+                        <label class="form-label">Fecha de pago</label>
+                        <input type="date" name="fecha_pago" class="form-control" value="<?= date('Y-m-d') ?>" required>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Cantidad de horas</label>
+                        <input type="text" class="form-control" value="<?= e(number_format($legajo_total_horas, 2, '.', '')) ?>" readonly>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Precio por hora</label>
+                        <input type="text" class="form-control" value="<?= e(money($legajo_valor_hora)) ?>" readonly>
+                      </div>
+                    </div>
+
+                    <div class="row g-3 mt-1">
+                      <div class="col-md-4">
+                        <label class="form-label">Descuentos</label>
+                        <input type="text" class="form-control" value="<?= e(money($legajo_descuentos)) ?>" readonly>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Adelantos</label>
+                        <input type="text" class="form-control" value="<?= e(money($legajo_adelantos)) ?>" readonly>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Cuota préstamo</label>
+                        <input type="text" class="form-control" value="<?= e(money($legajo_prestamos)) ?>" readonly>
+                      </div>
+                    </div>
+
+                    <div class="alert alert-info mt-3 mb-0">
+                      Saldo a pagar: <strong><?= e(money($legajo_saldo_pagar)) ?></strong><br>
+                      <span class="small">(<?= e(number_format($legajo_total_horas, 2, '.', '')) ?> × <?= e(money($legajo_valor_hora)) ?>) − <?= e(money($legajo_adelantos)) ?> − <?= e(money($legajo_prestamos)) ?> − <?= e(money($legajo_descuentos)) ?></span>
+                    </div>
+
+                    <div class="row g-3 mt-2">
+                      <div class="col-md-4">
+                        <label class="form-label">Monto a pagar</label>
+                        <input type="number" step="0.01" min="0" name="sueldo_neto" class="form-control" value="<?= e(number_format(max(0, $legajo_saldo_pagar), 2, '.', '')) ?>" required>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Medio</label>
+                        <select name="medio_pago" class="form-select">
+                          <option value="EFECTIVO">Efectivo</option>
+                          <option value="TRANSFERENCIA">Transferencia</option>
+                          <option value="CHEQUE">Cheque</option>
+                        </select>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Notas</label>
+                        <input type="text" name="notas" class="form-control" placeholder="Notas">
+                      </div>
+                    </div>
+
+                    <div class="small text-muted mt-3">
+                      Período: <?= $legajo_period_inicio && $legajo_period_fin ? e($legajo_period_inicio . ' al ' . $legajo_period_fin) : 'Se creará un período activo' ?>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-success" <?= $disable_pago ? 'disabled' : '' ?>>Pagar</button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>
@@ -1206,6 +1373,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                   elseif ($m['tipo'] === 'ADELANTO') $badge_color = 'warning';
                   elseif ($m['tipo'] === 'PAGO') $badge_color = 'success';
                   elseif ($m['tipo'] === 'PRESTAMO') $badge_color = 'info';
+                  elseif ($m['tipo'] === 'ASISTENCIA') $badge_color = 'primary';
                   elseif ($m['tipo'] === 'INCIDENCIA') {
                     $gravedad = $m['gravedad'] ?? 'LEVE';
                     if ($gravedad === 'GRAVE') $badge_color = 'dark';
@@ -1216,7 +1384,15 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <tr>
                     <td><span class="badge bg-<?= $badge_color ?>"><?= e($m['tipo']) ?></span></td>
                     <td><?= e($m['fecha']) ?></td>
-                    <td><?= $m['tipo'] === 'INCIDENCIA' ? '—' : money($m['monto']) ?></td>
+                    <td>
+                      <?php if ($m['tipo'] === 'INCIDENCIA'): ?>
+                        —
+                      <?php elseif ($m['tipo'] === 'ASISTENCIA'): ?>
+                        <?= e(number_format((float)($m['monto'] ?? 0), 2, '.', '')) ?> hs
+                      <?php else: ?>
+                        <?= money($m['monto']) ?>
+                      <?php endif; ?>
+                    </td>
                     <td><?= e($m['detalle'] ?? '—') ?></td>
                   </tr>
                 <?php endforeach; endif; ?>
