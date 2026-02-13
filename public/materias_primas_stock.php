@@ -71,9 +71,14 @@ include __DIR__ . '/../views/partials/navbar.php';
 ?>
 
 <div class="container py-3">
-  <div class="d-flex align-items-center justify-content-between mb-2">
-    <h5 class="mb-0">Stock de Materias Primas</h5>
-    <small class="text-muted">Uso rapido desde celular</small>
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <h5 class="mb-0">Stock de Materias Primas</h5>
+      <small class="text-muted">Uso rapido desde celular</small>
+    </div>
+    <a href="<?= url('stock_reportes.php') ?>" class="btn btn-outline-info btn-sm">
+      📊 Reportes
+    </a>
   </div>
 
   <?php if ($flash_ok): ?><div class="alert alert-success py-2"><?= e($flash_ok) ?></div><?php endif; ?>
