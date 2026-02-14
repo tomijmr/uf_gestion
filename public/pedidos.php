@@ -247,6 +247,9 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <td class="text-center"><?= badge_estado($r['estado']) ?></td>
                 <td class="text-end">
                   <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#it<?= (int)$r['id'] ?>">Ver</button>
+                  <?php if (!in_array($r['estado'], ['ENTREGADO','CERRADO'], true)): ?>
+                    <a class="btn btn-sm btn-outline-primary" href="<?= url('pedido_editar.php?order_id=' . (int)$r['id']) ?>">Editar</a>
+                  <?php endif; ?>
                   <?php if ($r['estado'] === 'LISTO_ENTREGA'): ?>
                     <form method="post" class="d-inline" onsubmit="return confirm('¿Entregar el pedido #<?= (int)$r['id'] ?>?');">
                       <input type="hidden" name="action" value="deliver">
