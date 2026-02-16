@@ -8,6 +8,224 @@ require_once __DIR__ . '/../app/helpers.php';
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+// ------------------------------------
+// MANEJO DE IMPRESIÓN (reporte limpio)
+// ------------------------------------
+if (isset($_GET['print']) && $_GET['print'] === '1' && ($_GET['tab'] ?? '') === 'reportes') {
+  $rep_desde = $_GET['rep_desde'] ?? date('Y-m-01');
+  $rep_hasta = $_GET['rep_hasta'] ?? date('Y-m-d');
+  $rep_tipo  = $_GET['rep_tipo'] ?? 'AMBOS';
+
+  $rep_ingresos = [];
+  $rep_gastos = [];
+  $rep_total_ingresos = 0;
+  $rep_total_gastos = 0;
+
+  // INGRESOS
+  if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
+    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente
+              FROM payments p
+              JOIN customers c ON c.id=p.customer_id
+              WHERE DATE(p.fecha) BETWEEN ? AND ?
+              ORDER BY p.fecha DESC";
+    $stmtRI = db()->prepare($sqlRI);
+    $stmtRI->execute([$rep_desde, $rep_hasta]);
+    $rep_ingresos = $stmtRI->fetchAll();
+    foreach ($rep_ingresos as $r) $rep_total_ingresos += (float)$r['importe'];
+  }
+
+  // GASTOS
+  if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
+    $sqlRG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
+              FROM cash_expenses e
+              LEFT JOIN users u ON u.id = e.created_by
+              WHERE DATE(e.fecha) BETWEEN ? AND ?
+              ORDER BY e.fecha DESC";
+    $stmtRG = db()->prepare($sqlRG);
+    $stmtRG->execute([$rep_desde, $rep_hasta]);
+    $rep_gastos = $stmtRG->fetchAll();
+    foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
+  }
+
+  $tituloReporte = "Reporte de Caja";
+  if ($rep_tipo === 'INGRESOS') $tituloReporte = "Reporte de Ingresos";
+  if ($rep_tipo === 'GASTOS') $tituloReporte = "Reporte de Egresos";
+
+  $logo = 'https://ui-avatars.com/api/?name=UF&background=0D8ABC&color=fff&size=128'; // Fallback o url real
+  // Intentar usar favicon local si existe como en stock_reportes
+  // $logo = url('favicon-96x96.png');
+  // Se asume que helper url() funciona.
+
+  ?>
+  <!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title><?= e($tituloReporte) ?></title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      body { font-family: Arial, sans-serif; color: #222; margin: 20px; }
+      .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; }
+      .header-left { display: flex; align-items: center; gap: 15px; }
+      .header-logo { width: 50px; height: 50px; object-fit: contain; }
+      .title { font-size: 24px; font-weight: bold; color: #333; }
+      .subtitle { font-size: 14px; color: #555; margin-top: 4px; }
+      .meta { text-align: right; font-size: 12px; color: #666; }
+      
+      .section-title { 
+        background-color: #f8f9fa; 
+        padding: 8px 12px; 
+        font-weight: bold; 
+        border-left: 4px solid #0d6efd; 
+        margin-top: 20px; 
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+      }
+      
+      table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+      th { background-color: #f1f1f1; font-weight: bold; }
+      .text-end { text-align: right; }
+      .fw-bold { font-weight: bold; }
+      .text-success { color: #198754; }
+      .text-danger { color: #dc3545; }
+      
+      .total-row td { border-top: 2px solid #333; font-weight: bold; background-color: #fdfdfd; }
+      
+      .summary-box { 
+        border: 1px solid #ccc; 
+        padding: 15px; 
+        width: 300px; 
+        margin-left: auto; 
+        background: #f9f9f9;
+        margin-top: 30px;
+      }
+      .summary-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+      .summary-total { border-top: 1px solid #999; padding-top: 5px; margin-top: 5px; font-weight: bold; font-size: 14px; }
+
+      @media print {
+        body { margin: 0; }
+        .no-print { display: none; }
+      }
+    </style>
+  </head>
+  <body onload="window.print()">
+    <div class="header">
+      <div class="header-left">
+        <!-- Puedes ajustar la ruta del logo -->
+        <div style="font-size:32px; font-weight:bold; color:#0d6efd;">UF</div>
+        <div>
+          <div class="title"><?= e($tituloReporte) ?></div>
+          <div class="subtitle">Desde <?= date('d/m/Y', strtotime($rep_desde)) ?> Hasta <?= date('d/m/Y', strtotime($rep_hasta)) ?></div>
+        </div>
+      </div>
+      <div class="meta">
+        Generado el: <?= date('d/m/Y H:i') ?><br>
+        Usuario: <?= e(user()['nombre']) ?>
+      </div>
+    </div>
+
+    <!-- SECCIÓN INGRESOS -->
+    <?php if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS'): ?>
+      <div class="section-title">
+        <span>INGRESOS</span>
+        <span>Total: $ <?= number_format($rep_total_ingresos, 2, ',', '.') ?></span>
+      </div>
+      <?php if (empty($rep_ingresos)): ?>
+        <p style="text-align:center; color:#777; font-style:italic;">No hay ingresos registrados en este período.</p>
+      <?php else: ?>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 100px;">Fecha</th>
+              <th>Cliente</th>
+              <th>Medio</th>
+              <th>Referencia</th>
+              <th class="text-end" style="width: 120px;">Importe</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($rep_ingresos as $ri): ?>
+              <tr>
+                <td><?= date('d/m/Y', strtotime($ri['fecha'])) ?></td>
+                <td><?= e($ri['cliente']) ?></td>
+                <td><?= e($ri['medio']) ?></td>
+                <td><?= e($ri['referencia']) ?></td>
+                <td class="text-end">$ <?= number_format((float)$ri['importe'], 2, ',', '.') ?></td>
+              </tr>
+            <?php endforeach; ?>
+            <tr class="total-row">
+              <td colspan="4" class="text-end">TOTAL INGRESOS</td>
+              <td class="text-end text-success">$ <?= number_format($rep_total_ingresos, 2, ',', '.') ?></td>
+            </tr>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    <?php endif; ?>
+
+    <!-- SECCIÓN GASTOS -->
+    <?php if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS'): ?>
+      <div class="section-title" style="border-left-color: #dc3545;">
+        <span>EGRESOS (GASTOS)</span>
+        <span>Total: $ <?= number_format($rep_total_gastos, 2, ',', '.') ?></span>
+      </div>
+      <?php if (empty($rep_gastos)): ?>
+        <p style="text-align:center; color:#777; font-style:italic;">No hay gastos registrados en este período.</p>
+      <?php else: ?>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 100px;">Fecha</th>
+              <th>Categoría</th>
+              <th>Descripción</th>
+              <th>Usuario</th>
+              <th class="text-end" style="width: 120px;">Importe</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($rep_gastos as $rg): ?>
+              <tr>
+                <td><?= date('d/m/Y', strtotime($rg['fecha'])) ?></td>
+                <td><?= e($rg['categoria']) ?></td>
+                <td><?= e($rg['descripcion']) ?></td>
+                <td><?= e($rg['usuario'] ?? '-') ?></td>
+                <td class="text-end">$ <?= number_format((float)$rg['importe'], 2, ',', '.') ?></td>
+              </tr>
+            <?php endforeach; ?>
+            <tr class="total-row">
+              <td colspan="4" class="text-end">TOTAL GASTOS</td>
+              <td class="text-end text-danger">$ <?= number_format($rep_total_gastos, 2, ',', '.') ?></td>
+            </tr>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    <?php endif; ?>
+
+    <!-- RESUMEN FINAL -->
+    <?php if ($rep_tipo === 'AMBOS'): ?>
+      <div class="summary-box">
+        <div class="summary-row">
+          <span>Total Ingresos:</span>
+          <span class="text-success">$ <?= number_format($rep_total_ingresos, 2, ',', '.') ?></span>
+        </div>
+        <div class="summary-row">
+          <span>Total Gastos:</span>
+          <span class="text-danger">- $ <?= number_format($rep_total_gastos, 2, ',', '.') ?></span>
+        </div>
+        <div class="summary-row summary-total">
+          <span>Balance Neto:</span>
+          <span>$ <?= number_format($rep_total_ingresos - $rep_total_gastos, 2, ',', '.') ?></span>
+        </div>
+      </div>
+    <?php endif; ?>
+
+  </body>
+  </html>
+  <?php
+  exit; // Detener ejecución para no cargar el resto de la página normal
+}
+
 
 $flash_ok = '';
 $flash_err = '';
@@ -18,7 +236,7 @@ $GASTO_CATEGORIAS = ['SERVICIOS','SUELDOS','ALQUILER','IMPUESTOS','INSUMOS','OTR
 // --------------------
 // Tab activo por GET
 // --------------------
-$validTabs = ['cobrar','recientes','cc','resumen','gastos'];
+$validTabs = ['cobrar','recientes','cc','resumen','gastos','reportes'];
 $tab = $_GET['tab'] ?? 'cobrar';
 if (!in_array($tab, $validTabs, true)) $tab = 'cobrar';
 
@@ -330,6 +548,52 @@ $stResG = db()->prepare("SELECT categoria, SUM(importe) AS total
 $stResG->execute([$hoy]);
 $resumenGastosHoy = $stResG->fetchAll();
 
+// --------------------
+// Reportes (tab=reportes)
+// --------------------
+$rep_desde = $_GET['rep_desde'] ?? date('Y-m-01');
+$rep_hasta = $_GET['rep_hasta'] ?? date('Y-m-d');
+$rep_tipo  = $_GET['rep_tipo'] ?? 'AMBOS'; // AMBOS, INGRESOS, GASTOS
+
+$rep_ingresos = [];
+$rep_gastos = [];
+$rep_total_ingresos = 0;
+$rep_total_gastos = 0;
+
+if ($tab === 'reportes') {
+  // INGRESOS
+  if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
+    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.voucher_path
+              FROM payments p
+              JOIN customers c ON c.id=p.customer_id
+              WHERE DATE(p.fecha) BETWEEN ? AND ?
+              ORDER BY p.fecha DESC";
+    $stmtRI = db()->prepare($sqlRI);
+    $stmtRI->execute([$rep_desde, $rep_hasta]);
+    $rep_ingresos = $stmtRI->fetchAll();
+
+    foreach ($rep_ingresos as $r) {
+      $rep_total_ingresos += (float)$r['importe'];
+    }
+  }
+
+  // GASTOS
+  if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
+    $sqlRG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
+              FROM cash_expenses e
+              LEFT JOIN users u ON u.id = e.created_by
+              WHERE DATE(e.fecha) BETWEEN ? AND ?
+              ORDER BY e.fecha DESC";
+    $stmtRG = db()->prepare($sqlRG);
+    $stmtRG->execute([$rep_desde, $rep_hasta]);
+    $rep_gastos = $stmtRG->fetchAll();
+
+    foreach ($rep_gastos as $r) {
+      $rep_total_gastos += (float)$r['importe'];
+    }
+  }
+}
+
 function money0($n) { return '$ ' . number_format((float)$n, 0, ',', '.'); }
 
 include __DIR__ . '/../views/partials/header.php';
@@ -339,6 +603,98 @@ include __DIR__ . '/../views/partials/navbar.php';
 function tabActive($t, $tab) { return $t===$tab ? 'active' : ''; }
 function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
 ?>
+<style>
+@media print {
+  @page { size: A4; margin: 1cm; }
+  body { background-color: white !important; font-family: sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  
+  /* Ocultar elementos de navegación e interfaz */
+  header, nav, .navbar, .nav-tabs, .btn, form, .alert-info, .card-header .btn, footer, .d-print-none {
+    display: none !important;
+  }
+  
+  /* Ajustes generales de contenedor */
+  .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  .tab-content { border: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }
+  .tab-pane { display: block !important; opacity: 1 !important; visibility: visible !important; }
+  
+  /* Mostrar solo el reporte activo */
+  #reportes { display: block !important; }
+  /* Ocultar otros tabs si por alguna razón se imprimen */
+  #cobrar, #recientes, #gastos, #cc, #resumen { display: none !important; }
+
+  /* Layout de columnas - FLEXIBILIDAD Y CENTRADO */
+  .row.print-row {
+    display: flex !important;
+    flex-wrap: wrap !important; /* Permitir wrap si es necesario, aunque intentaremos que no */
+    width: 100% !important;
+    margin: 0 !important;
+    justify-content: center !important; /* Centrar horizontalmente */
+  }
+
+  /* Caso: Dos columnas (Ingresos + Gastos) */
+  .col-print-6 {
+    flex: 0 0 48% !important;
+    max-width: 48% !important;
+    margin: 0 1% !important; /* Pequeño margen entre columnas */
+  }
+
+  /* Caso: Una sola columna (Solo Ingresos o Solo Gastos) */
+  .col-print-12 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Tablas y Cards */
+  .card { 
+    border: 1px solid #ddd !important; 
+    break-inside: avoid; /* Evitar que una tarjeta se rompa entre páginas si es posible */
+    margin-bottom: 20px !important;
+    box-shadow: none !important;
+  }
+  .card-header { 
+    border-bottom: 2px solid #000 !important; 
+    background-color: transparent !important; /* Ahorrar tinta, usar borde/texto color */
+    color: #000 !important; /* Texto negro para contraste */
+  }
+  
+  /* Colores para distinguir si se desea (aunque en blaco y negro el borde manda) */
+  .border-success { border-color: #000 !important; } /* Borde negro simple */
+  .border-danger { border-color: #000 !important; }
+  
+  /* Texto en cabecera de card: forzar color o dejar negro */
+  .card-header.bg-success { border-bottom: 2px solid green !important; }
+  .card-header.bg-danger { border-bottom: 2px solid red !important; }
+  
+  /* Altura automática y sin scroll */
+  .table-responsive { 
+    max-height: none !important; 
+    overflow: visible !important; 
+    display: block !important;
+  }
+  
+  /* Títulos de impresión */
+  .print-header { 
+    display: block !important; 
+    margin-bottom: 20px; 
+    text-align: center; 
+    border-bottom: 2px solid #333; 
+    padding-bottom: 15px; 
+    width: 100%;
+  }
+  
+  /* Ajustes de fuente para que entre más info */
+  body, table { font-size: 10pt !important; }
+  h2 { font-size: 18pt !important; margin: 0; }
+  p { margin: 5px 0 0 0; font-size: 11pt; }
+  
+  /* Evitar saltos de página dentro de filas de tabla */
+  tr { break-inside: avoid; page-break-inside: avoid; }
+}
+.print-header { display: none; }
+</style>
+
 <div class="container py-4">
   <h5 class="mb-3">Caja</h5>
 
@@ -354,6 +710,9 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link <?= tabActive('gastos',$tab) ?>" id="gastos-tab" data-bs-toggle="tab" data-bs-target="#gastos" type="button" role="tab">Gastos</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link <?= tabActive('reportes',$tab) ?>" id="reportes-tab" data-bs-toggle="tab" data-bs-target="#reportes" type="button" role="tab">Reportes</button>
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link <?= tabActive('cc',$tab) ?>" id="cc-tab" data-bs-toggle="tab" data-bs-target="#cc" type="button" role="tab">Cuenta Corriente</button>
@@ -669,6 +1028,157 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- REPORTES -->
+    <div class="tab-pane fade <?= paneActive('reportes',$tab) ?>" id="reportes" role="tabpanel" aria-labelledby="reportes-tab">
+      <div class="print-header">
+        <?php 
+          $tituloReporte = "Reporte de Caja";
+          if ($rep_tipo === 'INGRESOS') $tituloReporte = "Reporte de Ingresos";
+          if ($rep_tipo === 'GASTOS') $tituloReporte = "Reporte de Egresos";
+        ?>
+        <h2><?= $tituloReporte ?></h2>
+        <p><strong>Desde:</strong> <?= date('d/m/Y', strtotime($rep_desde)) ?> &nbsp;&nbsp;&nbsp; <strong>Hasta:</strong> <?= date('d/m/Y', strtotime($rep_hasta)) ?></p>
+      </div>
+
+      <form class="row g-2 mb-4 align-items-end d-print-none" method="get" action="<?= url('caja.php') ?>">
+        <input type="hidden" name="tab" value="reportes">
+        <div class="col-auto">
+          <label class="form-label fw-bold">Desde</label>
+          <input type="date" name="rep_desde" class="form-control" value="<?= e($rep_desde) ?>">
+        </div>
+        <div class="col-auto">
+          <label class="form-label fw-bold">Hasta</label>
+          <input type="date" name="rep_hasta" class="form-control" value="<?= e($rep_hasta) ?>">
+        </div>
+        <div class="col-auto">
+          <label class="form-label fw-bold">Tipo</label>
+          <select name="rep_tipo" class="form-select">
+            <option value="AMBOS" <?= $rep_tipo==='AMBOS'?'selected':'' ?>>Ambos (Resumen)</option>
+            <option value="INGRESOS" <?= $rep_tipo==='INGRESOS'?'selected':'' ?>>Solo Ingresos</option>
+            <option value="GASTOS" <?= $rep_tipo==='GASTOS'?'selected':'' ?>>Solo Egresos</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-primary">Generar</button>
+        </div>
+        <div class="col-auto ms-auto">
+          <button type="button" class="btn btn-secondary" onclick="imprimirReporte()">
+            <i class="bi bi-printer"></i> Imprimir Reporte
+          </button>
+        </div>
+      </form>
+
+      <script>
+        function imprimirReporte() {
+          const d = document.querySelector('input[name=rep_desde]').value;
+          const h = document.querySelector('input[name=rep_hasta]').value;
+          const t = document.querySelector('select[name=rep_tipo]').value;
+          const url = '<?= url("caja.php") ?>?tab=reportes&print=1&rep_desde='+d+'&rep_hasta='+h+'&rep_tipo='+t;
+          window.open(url, '_blank');
+        }
+      </script>
+
+      <?php if ($tab === 'reportes'): ?>
+        
+        <div class="row g-4 print-row">
+          <?php 
+            // Lógica de grilla: si es ambos, col-lg-6. Si es uno solo, col-lg-12
+            $colClass = ($rep_tipo === 'AMBOS') ? 'col-lg-6 col-print-6' : 'col-lg-12 col-print-12';
+          ?>
+
+          <!-- INGRESOS -->
+          <?php if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS'): ?>
+          <div class="<?= $colClass ?>">
+            <div class="card h-100 border-success">
+              <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <span class="fw-bold">INGRESOS</span>
+                <span class="badge bg-white text-success fs-6"><?= money($rep_total_ingresos) ?></span>
+              </div>
+              <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 600px;">
+                  <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Cliente / Detalle</th> <!-- Combiné para ahorrar espacio -->
+                        <th class="text-end">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (!$rep_ingresos): ?>
+                      <tr><td colspan="3" class="text-center text-muted py-3">No hay ingresos en este período.</td></tr>
+                    <?php else: foreach ($rep_ingresos as $ri): ?>
+                      <tr>
+                        <td style="white-space:nowrap;"><?= date('d/m/Y', strtotime($ri['fecha'])) ?></td>
+                        <td>
+                          <div class="fw-semibold"><?= e($ri['cliente']) ?></div>
+                          <small class="text-muted"><?= e($ri['medio']) ?> <?= $ri['referencia'] ? ' - '.e($ri['referencia']) : '' ?></small>
+                        </td>
+                        <td class="text-end text-success fw-semibold"><?= money($ri['importe']) ?></td>
+                      </tr>
+                    <?php endforeach; endif; ?>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <?php endif; ?>
+
+          <!-- GASTOS -->
+          <?php if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS'): ?>
+          <div class="<?= $colClass ?>">
+            <div class="card h-100 border-danger">
+              <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                <span class="fw-bold">GASTOS</span>
+                <span class="badge bg-white text-danger fs-6"><?= money($rep_total_gastos) ?></span>
+              </div>
+              <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 600px;">
+                  <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Categoría / Descripción</th>
+                        <th class="text-end">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (!$rep_gastos): ?>
+                      <tr><td colspan="3" class="text-center text-muted py-3">No hay gastos en este período.</td></tr>
+                    <?php else: foreach ($rep_gastos as $rg): ?>
+                      <tr>
+                        <td style="white-space:nowrap;"><?= date('d/m/Y', strtotime($rg['fecha'])) ?></td>
+                        <td>
+                          <div class="badge bg-secondary mb-1"><?= e($rg['categoria']) ?></div>
+                          <div class="small"><?= e($rg['descripcion']) ?></div>
+                          <small class="text-muted fst-italic">Por: <?= e($rg['usuario'] ?? 'Anónimo') ?></small>
+                        </td>
+                        <td class="text-end text-danger fw-semibold"><?= money($rg['importe']) ?></td>
+                      </tr>
+                    <?php endforeach; endif; ?>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <?php endif; ?>
+        </div>
+
+
+        <div class="alert alert-secondary mt-3 text-center">
+            <?php $rep_neto = $rep_total_ingresos - $rep_total_gastos; ?>
+            <span class="fw-bold fs-5">Balance del período: 
+              <span class="<?= $rep_neto >= 0 ? 'text-success' : 'text-danger' ?>"><?= money($rep_neto) ?></span>
+            </span>
+        </div>
+
+      <?php else: ?>
+        <div class="alert alert-info">Seleccioná un rango de fechas y hacé clic en "Generar reporte".</div>
+      <?php endif; ?>
     </div>
 
     <!-- CUENTA CORRIENTE -->
