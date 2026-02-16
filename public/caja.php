@@ -34,15 +34,36 @@ if (isset($_GET['print']) && $_GET['print'] === '1' && ($_GET['tab'] ?? '') === 
     foreach ($rep_ingresos as $r) $rep_total_ingresos += (float)$r['importe'];
   }
 
-  // GASTOS
+  // GASTOS (Gastos Caja + Compras)
   if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
-    $sqlRG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
+    // Usamos CAST para evitar problemas de colación en el UNION
+    $sqlRG = "SELECT e.fecha, 
+                     CAST(e.categoria AS CHAR) as categoria, 
+                     CAST(e.descripcion AS CHAR) as descripcion, 
+                     CAST(e.medio AS CHAR) as medio, 
+                     e.importe, 
+                     CAST(u.nombre AS CHAR) AS usuario 
               FROM cash_expenses e
               LEFT JOIN users u ON u.id = e.created_by
               WHERE DATE(e.fecha) BETWEEN ? AND ?
-              ORDER BY e.fecha DESC";
+
+              UNION ALL
+
+              SELECT p.fecha, 
+                     CAST('COMPRA' AS CHAR) as categoria, 
+                     CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR) as descripcion,
+                     CAST('COMPRA' AS CHAR) as medio, 
+                     p.total as importe, 
+                     CAST(u.nombre AS CHAR) as usuario
+              FROM purchases p
+              LEFT JOIN users u ON u.id = p.created_by
+              WHERE DATE(p.fecha) BETWEEN ? AND ?
+
+              ORDER BY fecha DESC";
+              
     $stmtRG = db()->prepare($sqlRG);
-    $stmtRG->execute([$rep_desde, $rep_hasta]);
+    // Bindparams se duplican por el UNION
+    $stmtRG->execute([$rep_desde, $rep_hasta, $rep_desde, $rep_hasta]);
     $rep_gastos = $stmtRG->fetchAll();
     foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
   }
@@ -577,15 +598,36 @@ if ($tab === 'reportes') {
     }
   }
 
-  // GASTOS
+  // GASTOS (Gastos Caja + Compras)
   if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
-    $sqlRG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
+    // Usamos CAST para evitar problemas de colación en el UNION
+    $sqlRG = "SELECT e.fecha, 
+                     CAST(e.categoria AS CHAR) as categoria, 
+                     CAST(e.descripcion AS CHAR) as descripcion, 
+                     CAST(e.medio AS CHAR) as medio, 
+                     e.importe, 
+                     CAST(u.nombre AS CHAR) AS usuario 
               FROM cash_expenses e
               LEFT JOIN users u ON u.id = e.created_by
               WHERE DATE(e.fecha) BETWEEN ? AND ?
-              ORDER BY e.fecha DESC";
+
+              UNION ALL
+
+              SELECT p.fecha, 
+                     CAST('COMPRA' AS CHAR) as categoria, 
+                     CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR) as descripción,
+                     CAST('COMPRA' AS CHAR) as medio, 
+                     p.total as importe, 
+                     CAST(u.nombre AS CHAR) as usuario
+              FROM purchases p
+              LEFT JOIN users u ON u.id = p.created_by
+              WHERE DATE(p.fecha) BETWEEN ? AND ?
+
+              ORDER BY fecha DESC";
+
     $stmtRG = db()->prepare($sqlRG);
-    $stmtRG->execute([$rep_desde, $rep_hasta]);
+    // Bindparams se duplican por el UNION
+    $stmtRG->execute([$rep_desde, $rep_hasta, $rep_desde, $rep_hasta]);
     $rep_gastos = $stmtRG->fetchAll();
 
     foreach ($rep_gastos as $r) {
