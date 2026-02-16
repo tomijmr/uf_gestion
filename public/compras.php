@@ -48,6 +48,168 @@ $whereSQL = $where ? ("WHERE " . implode(" AND ", $where)) : "";
 // Validar orden
 $orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
 
+/* --- EXPORTAR CSV --- */
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $filename = "compras_" . date('Y-m-d_H-i') . ".csv";
+    
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    
+    $output = fopen('php://output', 'w');
+    
+    // BOM para Excel
+    fputs($output, "\xEF\xBB\xBF");
+    
+    // Encabezados
+    fputcsv($output, ['ID', 'Fecha', 'Proveedor', 'Tipo', 'Serie', 'Numero', 'Total', 'Usuario', 'Detalle']);
+    
+    // Query sin paginación
+    $sqlExport = "SELECT p.*, u.nombre AS usuario
+                  FROM purchases p
+                  LEFT JOIN users u ON u.id = p.created_by
+                  $whereSQL
+                  ORDER BY p.fecha $orden_fecha, p.id $orden_fecha";
+    $stExport = db()->prepare($sqlExport);
+    $stExport->execute($params);
+    
+    while ($row = $stExport->fetch(PDO::FETCH_ASSOC)) {
+        fputcsv($output, [
+            $row['id'],
+            $row['fecha'],
+            $row['proveedor'],
+            $row['comp_tipo'],
+            $row['comp_serie'],
+            $row['comp_numero'],
+            number_format((float)$row['total'], 2, ',', ''),
+            $row['usuario'] ?? '',
+            $row['notas'] ?? ''
+        ]);
+    }
+    
+    fclose($output);
+    exit;
+}
+
+/* --- IMPRIMIR REPORTE (HTML) --- */
+if (isset($_GET['print']) && $_GET['print'] === '1') {
+    // Calcular total filtrado sin paginación
+    $stTotal = db()->prepare("SELECT SUM(p.total) FROM purchases p $whereSQL");
+    $stTotal->execute($params);
+    $print_total_filtrado = (float)$stTotal->fetchColumn();
+
+    // Query sin paginación
+    $sqlPrint = "SELECT p.*, u.nombre AS usuario
+                  FROM purchases p
+                  LEFT JOIN users u ON u.id = p.created_by
+                  $whereSQL
+                  ORDER BY p.fecha $orden_fecha, p.id $orden_fecha";
+    $stPrint = db()->prepare($sqlPrint);
+    $stPrint->execute($params);
+    $rowsPrint = $stPrint->fetchAll(PDO::FETCH_ASSOC);
+
+    $tituloReporte = "Reporte de Compras";
+    $rango = "";
+    if ($fdesde && $fhasta) {
+        $rango = "Desde " . date('d/m/Y', strtotime($fdesde)) . " Hasta " . date('d/m/Y', strtotime($fhasta));
+    } elseif ($fdesde) {
+        $rango = "Desde " . date('d/m/Y', strtotime($fdesde));
+    } elseif ($fhasta) {
+        $rango = "Hasta " . date('d/m/Y', strtotime($fhasta));
+    } else {
+        $rango = "Histórico completo";
+    }
+
+    if ($q) {
+        $rango .= " (Filtro: " . e($q) . ")";
+    }
+
+    ?>
+<!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title><?= e($tituloReporte) ?></title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      body { font-family: Arial, sans-serif; color: #222; margin: 20px; }
+      .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; }
+      .header-left { display: flex; align-items: center; gap: 15px; }
+      .title { font-size: 24px; font-weight: bold; color: #333; }
+      .subtitle { font-size: 14px; color: #555; margin-top: 4px; }
+      .meta { text-align: right; font-size: 12px; color: #666; }
+      
+      table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 20px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; vertical-align: top; }
+      th { background-color: #f1f1f1; font-weight: bold; }
+      .text-end { text-align: right; }
+      .text-center { text-align: center; }
+      
+      .total-row td { border-top: 2px solid #333; font-weight: bold; background-color: #fdfdfd; font-size: 12px; }
+      
+      @media print {
+        body { margin: 0; }
+        .no-print { display: none; }
+      }
+    </style>
+  </head>
+  <body onload="window.print()">
+    <div class="header">
+      <div class="header-left">
+        <div style="font-size:32px; font-weight:bold; color:#0d6efd;">UF</div>
+        <div>
+          <div class="title"><?= e($tituloReporte) ?></div>
+          <div class="subtitle"><?= e($rango) ?></div>
+        </div>
+      </div>
+      <div class="meta">
+        Generado el: <?= date('d/m/Y H:i') ?><br>
+        Usuario: <?= e(user()['nombre']) ?>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 80px;">Fecha</th>
+          <th>Proveedor</th>
+          <th>Comprobante</th>
+          <th>Usuario</th>
+          <th class="text-end" style="width: 100px;">Importe</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if (empty($rowsPrint)): ?>
+            <tr><td colspan="5" class="text-center" style="padding: 20px; color: #777;">No se encontraron registros.</td></tr>
+        <?php else: ?>
+            <?php foreach ($rowsPrint as $row): ?>
+            <tr>
+                <td><?= date('d/m/Y', strtotime($row['fecha'])) ?></td>
+                <td><?= e($row['proveedor']) ?></td>
+                <td>
+                    <div style="font-weight:bold;"><?= e($row['comp_tipo']) ?></div>
+                    <div style="font-size:10px; color:#555;"><?= e($row['comp_serie']) ?> <?= e($row['comp_numero']) ?></div>
+                    <?php if ($row['notas']): ?>
+                        <div style="font-size:10px; font-style:italic; margin-top:2px;"><?= e($row['notas']) ?></div>
+                    <?php endif; ?>
+                </td>
+                <td><?= e($row['usuario'] ?? '-') ?></td>
+                <td class="text-end">$ <?= number_format((float)$row['total'], 2, ',', '.') ?></td>
+            </tr>
+            <?php endforeach; ?>
+            <tr class="total-row">
+                <td colspan="4" class="text-end">TOTAL PERÍODO</td>
+                <td class="text-end">$ <?= number_format($print_total_filtrado, 2, ',', '.') ?></td>
+            </tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+
+  </body>
+  </html>
+    <?php
+    exit;
+}
+
 /* --- Paginación --- */
 $page  = max(1, (int)($_GET['page'] ?? 1));
 $limit = 25;
@@ -121,17 +283,48 @@ include __DIR__ . '/../views/partials/navbar.php';
       </select>
     </div>
 
-    <div class="col-md-2 d-grid">
-      <label class="form-label">&nbsp;</label>
-      <button class="btn btn-outline-secondary">Filtrar</button>
-    </div>
-
-    <div class="col-md-1 d-grid">
-      <label class="form-label">&nbsp;</label>
-      <a class="btn btn-outline-secondary" href="<?= url('compras.php') ?>">Limpiar</a>
+    <div class="col-md-3 d-grid gap-2 d-md-flex align-items-end">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <button class="btn btn-success" type="button" onclick="exportarCSV()">Exportar</button>
+        <button class="btn btn-secondary" type="button" onclick="imprimirListado()">Imprimir</button>
+        <a class="btn btn-outline-secondary" href="<?= url('compras.php') ?>">Limpiar</a>
     </div>
 
   </form>
+
+  <script>
+    function exportarCSV() {
+      const q = document.querySelector('input[name=q]').value;
+      const fdesde = document.querySelector('input[name=fdesde]').value;
+      const fhasta = document.querySelector('input[name=fhasta]').value;
+      const orden = document.querySelector('select[name=orden_fecha]').value;
+      
+      const params = new URLSearchParams({
+        q: q,
+        fdesde: fdesde,
+        fhasta: fhasta,
+        orden_fecha: orden,
+        export: 'csv'
+      });
+      window.location.href = '<?= url("compras.php") ?>?' + params.toString();
+    }
+
+    function imprimirListado() {
+      const q = document.querySelector('input[name=q]').value;
+      const fdesde = document.querySelector('input[name=fdesde]').value;
+      const fhasta = document.querySelector('input[name=fhasta]').value;
+      const orden = document.querySelector('select[name=orden_fecha]').value;
+      
+      const params = new URLSearchParams({
+        q: q,
+        fdesde: fdesde,
+        fhasta: fhasta,
+        orden_fecha: orden,
+        print: '1'
+      });
+      window.open('<?= url("compras.php") ?>?' + params.toString(), '_blank');
+    }
+  </script>
 <?php
 // --- Total histórico ---
 $sth = db()->query("SELECT SUM(total) FROM purchases");
