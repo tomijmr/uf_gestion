@@ -83,10 +83,10 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
 
     // Bloque INGRESOS
     if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
-      fputcsv($out, ['--- REPORTE DE INGRESOS ---']);
-      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta]);
-      fputcsv($out, []); // Espacio
-      fputcsv($out, ['ID', 'FECHA', 'CLIENTE', 'MEDIO', 'REFERENCIA', 'IMPORTE']);
+      fputcsv($out, ['--- REPORTE DE INGRESOS ---'], ",", "\"", "\\");
+      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta], ",", "\"", "\\");
+      fputcsv($out, [], ",", "\"", "\\"); // Espacio
+      fputcsv($out, ['ID', 'FECHA', 'CLIENTE', 'MEDIO', 'REFERENCIA', 'IMPORTE'], ",", "\"", "\\");
       
       foreach ($rep_ingresos as $r) {
         fputcsv($out, [
@@ -96,18 +96,18 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
           $r['medio'],
           $r['referencia'],
           number_format((float)$r['importe'], 2, '.', '')
-        ]);
+        ], ",", "\"", "\\");
       }
-      fputcsv($out, ['TOTAL INGRESOS', '', '', '', '', number_format($rep_total_ingresos, 2, '.', '')]);
-      fputcsv($out, []); // Separador
+      fputcsv($out, ['TOTAL INGRESOS', '', '', '', '', number_format($rep_total_ingresos, 2, '.', '')], ",", "\"", "\\");
+      fputcsv($out, [], ",", "\"", "\\"); // Separador
     }
 
     // Bloque GASTOS
     if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
-      fputcsv($out, ['--- REPORTE DE EGRESOS ---']);
-      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta]);
-      fputcsv($out, []); // Espacio
-      fputcsv($out, ['FECHA', 'CATEGORIA', 'DESCRIPCION', 'MEDIO', 'USUARIO', 'IMPORTE']);
+      fputcsv($out, ['--- REPORTE DE EGRESOS ---'], ",", "\"", "\\");
+      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta], ",", "\"", "\\");
+      fputcsv($out, [], ",", "\"", "\\"); // Espacio
+      fputcsv($out, ['FECHA', 'CATEGORIA', 'DESCRIPCION', 'MEDIO', 'USUARIO', 'IMPORTE'], ",", "\"", "\\");
       
       foreach ($rep_gastos as $r) {
         fputcsv($out, [
@@ -117,16 +117,16 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
           $r['medio'],
           $r['usuario'],
           number_format((float)$r['importe'], 2, '.', '')
-        ]);
+        ], ",", "\"", "\\");
       }
-      fputcsv($out, ['TOTAL EGRESOS', '', '', '', '', number_format($rep_total_gastos, 2, '.', '')]);
-      fputcsv($out, []); // Separador
+      fputcsv($out, ['TOTAL EGRESOS', '', '', '', '', number_format($rep_total_gastos, 2, '.', '')], ",", "\"", "\\");
+      fputcsv($out, [], ",", "\"", "\\"); // Separador
     }
     
     // Balance Final si es AMBOS
     if ($rep_tipo === 'AMBOS') {
       $balance = $rep_total_ingresos - $rep_total_gastos;
-      fputcsv($out, ['BALANCE TOTAL (INGRE - EGRE)', number_format($balance, 2, '.', '')]);
+      fputcsv($out, ['BALANCE TOTAL (INGRE - EGRE)', number_format($balance, 2, '.', '')], ",", "\"", "\\");
     }
 
     fclose($out);
