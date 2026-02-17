@@ -9,9 +9,12 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // ------------------------------------
-// MANEJO DE IMPRESIÓN (reporte limpio)
+// MANEJO DE IMPRESIÓN Y EXPORTACIÓN (reporte limpio)
 // ------------------------------------
-if (isset($_GET['print']) && $_GET['print'] === '1' && ($_GET['tab'] ?? '') === 'reportes') {
+$is_print  = isset($_GET['print']) && $_GET['print'] === '1';
+$is_export = isset($_GET['export']) && $_GET['export'] === 'csv';
+
+if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
   $rep_desde = $_GET['rep_desde'] ?? date('Y-m-01');
   $rep_hasta = $_GET['rep_hasta'] ?? date('Y-m-d');
   $rep_tipo  = $_GET['rep_tipo'] ?? 'AMBOS';
@@ -68,6 +71,71 @@ if (isset($_GET['print']) && $_GET['print'] === '1' && ($_GET['tab'] ?? '') === 
     foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
   }
 
+  // ---------------------------------
+  // MODO CSV
+  // ---------------------------------
+  if ($is_export) {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=reporte_caja_' . $rep_tipo . '_' . date('Y-m-d') . '.csv');
+    
+    $out = fopen('php://output', 'w');
+    fputs($out, "\xEF\xBB\xBF"); // BOM para Excel
+
+    // Bloque INGRESOS
+    if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
+      fputcsv($out, ['--- REPORTE DE INGRESOS ---']);
+      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta]);
+      fputcsv($out, []); // Espacio
+      fputcsv($out, ['ID', 'FECHA', 'CLIENTE', 'MEDIO', 'REFERENCIA', 'IMPORTE']);
+      
+      foreach ($rep_ingresos as $r) {
+        fputcsv($out, [
+          $r['id'],
+          $r['fecha'],
+          $r['cliente'],
+          $r['medio'],
+          $r['referencia'],
+          number_format((float)$r['importe'], 2, '.', '')
+        ]);
+      }
+      fputcsv($out, ['TOTAL INGRESOS', '', '', '', '', number_format($rep_total_ingresos, 2, '.', '')]);
+      fputcsv($out, []); // Separador
+    }
+
+    // Bloque GASTOS
+    if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
+      fputcsv($out, ['--- REPORTE DE EGRESOS ---']);
+      fputcsv($out, ['Desde:', $rep_desde, 'Hasta:', $rep_hasta]);
+      fputcsv($out, []); // Espacio
+      fputcsv($out, ['FECHA', 'CATEGORIA', 'DESCRIPCION', 'MEDIO', 'USUARIO', 'IMPORTE']);
+      
+      foreach ($rep_gastos as $r) {
+        fputcsv($out, [
+          $r['fecha'],
+          $r['categoria'],
+          $r['descripcion'],
+          $r['medio'],
+          $r['usuario'],
+          number_format((float)$r['importe'], 2, '.', '')
+        ]);
+      }
+      fputcsv($out, ['TOTAL EGRESOS', '', '', '', '', number_format($rep_total_gastos, 2, '.', '')]);
+      fputcsv($out, []); // Separador
+    }
+    
+    // Balance Final si es AMBOS
+    if ($rep_tipo === 'AMBOS') {
+      $balance = $rep_total_ingresos - $rep_total_gastos;
+      fputcsv($out, ['BALANCE TOTAL (INGRE - EGRE)', number_format($balance, 2, '.', '')]);
+    }
+
+    fclose($out);
+    exit;
+  }
+
+  // ---------------------------------
+  // MODO PRINT (HTML)
+  // ---------------------------------
   $tituloReporte = "Reporte de Caja";
   if ($rep_tipo === 'INGRESOS') $tituloReporte = "Reporte de Ingresos";
   if ($rep_tipo === 'GASTOS') $tituloReporte = "Reporte de Egresos";
@@ -1105,14 +1173,24 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
         <div class="col-auto">
           <button class="btn btn-primary">Generar</button>
         </div>
-        <div class="col-auto ms-auto">
+        <div class="col-auto ms-auto d-flex gap-2">
+          <button type="button" class="btn btn-success" onclick="exportarCSV()">
+            <i class="bi bi-file-earmark-spreadsheet"></i> Exportar CSV
+          </button>
           <button type="button" class="btn btn-secondary" onclick="imprimirReporte()">
-            <i class="bi bi-printer"></i> Imprimir Reporte
+            <i class="bi bi-printer"></i> Imprimir
           </button>
         </div>
       </form>
 
       <script>
+        function exportarCSV() {
+          const d = document.querySelector('input[name=rep_desde]').value;
+          const h = document.querySelector('input[name=rep_hasta]').value;
+          const t = document.querySelector('select[name=rep_tipo]').value;
+          window.open(`caja.php?tab=reportes&export=csv&rep_desde=${d}&rep_hasta=${h}&rep_tipo=${t}`, '_blank');
+        }
+
         function imprimirReporte() {
           const d = document.querySelector('input[name=rep_desde]').value;
           const h = document.querySelector('input[name=rep_hasta]').value;
