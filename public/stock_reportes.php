@@ -43,7 +43,7 @@ if ((isset($_GET['print']) || isset($_GET['export'])) && isset($_GET['tipo'])) {
       fputs($out, "\xEF\xBB\xBF");
       
       // Encabezados
-      fputcsv($out, ['CODIGO', 'NOMBRE', 'UNIDAD', 'STOCK ACTUAL']);
+      fputcsv($out, ['CODIGO', 'NOMBRE', 'UNIDAD', 'STOCK ACTUAL'], ",", "\"", "\\");
       
       foreach ($items as $item) {
         fputcsv($out, [
@@ -52,7 +52,7 @@ if ((isset($_GET['print']) || isset($_GET['export'])) && isset($_GET['tipo'])) {
           $item['unidad'],
           // Formato numérico standard o con coma dependiendo preferencia, usamos punto para CSV standard
           number_format((float)$item['stock_actual'], 2, '.', '')
-        ]);
+        ], ",", "\"", "\\");
       }
       fclose($out);
       exit;
@@ -183,7 +183,7 @@ if ((isset($_GET['print']) || isset($_GET['export'])) && isset($_GET['tipo'])) {
       $out = fopen('php://output', 'w');
       fputs($out, "\xEF\xBB\xBF");
       
-      fputcsv($out, ['FECHA', 'TIPO', 'CODIGO', 'NOMBRE', 'UNIDAD', 'CANTIDAD', 'MOTIVO', 'OBSERVACIONES']);
+      fputcsv($out, ['FECHA', 'TIPO', 'CODIGO', 'NOMBRE', 'UNIDAD', 'CANTIDAD', 'MOTIVO', 'OBSERVACIONES'], ",", "\"", "\\");
       
       foreach ($items as $item) {
         fputcsv($out, [
@@ -195,7 +195,7 @@ if ((isset($_GET['print']) || isset($_GET['export'])) && isset($_GET['tipo'])) {
           number_format((float)$item['cantidad'], 2, '.', ''),
           $item['motivo'],
           $item['observaciones']
-        ]);
+        ], ",", "\"", "\\");
       }
       fclose($out);
       exit;
