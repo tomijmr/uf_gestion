@@ -14,6 +14,109 @@ ini_set('display_errors', 1);
 $is_print  = isset($_GET['print']) && $_GET['print'] === '1';
 $is_export = isset($_GET['export']) && $_GET['export'] === 'csv';
 
+// --- Imprimir Cuenta Corriente ---
+if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'cc') {
+  $cc_customer = (int)($_GET['cc_customer'] ?? 0);
+  if ($cc_customer > 0) {
+    // Info Cliente
+    $stC = db()->prepare("SELECT nombre FROM customers WHERE id=?");
+    $stC->execute([$cc_customer]);
+    $cli = $stC->fetch();
+    $nombreCliente = $cli['nombre'] ?? 'Cliente Desconocido';
+
+    // Saldo
+    $sSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
+                           FROM customer_ledger WHERE customer_id=?");
+    $sSaldo->execute([$cc_customer]);
+    $cc_saldo = (float)$sSaldo->fetch()['saldo'];
+
+    // Movimientos (mism query que vista, pero quizás sin limit o limit más grande)
+    $sqlCC = "SELECT cl.id, cl.fecha, cl.tipo, cl.origen, cl.referencia_id, cl.detalle, cl.monto, cl.saldo_resultante,
+                     p.medio, p.bank_account_id, p.third_party_name, p.referencia, ba.nombre AS bank_name
+              FROM customer_ledger cl
+              LEFT JOIN payments p ON p.id = cl.referencia_id AND cl.origen = 'PAGO'
+              LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
+              WHERE cl.customer_id=?
+              ORDER BY cl.fecha DESC, cl.id DESC";
+    $stCc = db()->prepare($sqlCC);
+    $stCc->execute([$cc_customer]);
+    $cc_rows = $stCc->fetchAll();
+
+    $logo = 'https://ui-avatars.com/api/?name=UF&background=0D8ABC&color=fff&size=128'; 
+    $fecha = date('d/m/Y H:i');
+
+    if ($is_print) {
+      ?>
+      <!doctype html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8">
+        <title>Cuenta Corriente - <?= e($nombreCliente) ?></title>
+        <style>
+          @page { size: A4; margin: 15mm; }
+          body { font-family: Arial, sans-serif; color: #222; margin: 20px; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; }
+          .title { font-size: 20px; font-weight: bold; }
+          .sub { font-size: 12px; color: #555; }
+          .saldo-box { text-align: right; margin-bottom: 15px; font-size: 14px; font-weight: bold; background: #f8f9fa; padding: 10px; border-radius: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th, td { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+          th { background: #f0f0f0; }
+          .text-end { text-align: right; }
+          .badge { padding: 2px 4px; border-radius: 3px; font-size: 9px; border: 1px solid #ccc; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">Cuenta Corriente</div>
+            <div class="sub">Cliente: <strong><?= e($nombreCliente) ?></strong></div>
+            <div class="sub">Universal Fitness SA</div>
+          </div>
+          <div style="text-align:right">
+            <div class="sub"><?= e($fecha) ?></div>
+          </div>
+        </div>
+
+        <div class="saldo-box">
+          Saldo Actual: $ <?= number_format($cc_saldo, 2, ',', '.') ?>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Origen</th>
+              <th>Detalle/Ref</th>
+              <th class="text-end">Monto</th>
+              <th class="text-end">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($cc_rows as $row): ?>
+              <tr>
+                <td><?= date('d/m/Y', strtotime($row['fecha'])) ?></td>
+                <td><?= e($row['tipo']) ?></td>
+                <td><?= e($row['origen']) ?></td>
+                <td>
+                  <?= e($row['detalle']) ?>
+                  <?php if($row['referencia']) echo " (Ref: {$row['referencia']})"; ?>
+                </td>
+                <td class="text-end">$ <?= number_format((float)$row['monto'], 2, ',', '.') ?></td>
+                <td class="text-end">$ <?= number_format((float)$row['saldo_resultante'], 2, ',', '.') ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </body>
+      </html>
+      <?php
+      exit;
+    }
+  }
+}
+
 if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
   $rep_desde = $_GET['rep_desde'] ?? date('Y-m-01');
   $rep_hasta = $_GET['rep_hasta'] ?? date('Y-m-d');
@@ -1314,9 +1417,15 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
             <?php endforeach; ?>
           </select>
         </div>
-        <div class="col-md-4 d-grid">
+        <div class="col-md-2 d-grid">
           <label class="form-label">&nbsp;</label>
           <button class="btn btn-outline-secondary">Ver movimientos</button>
+        </div>
+        <div class="col-md-2 d-grid">
+          <label class="form-label">&nbsp;</label>
+          <button type="submit" name="print" value="1" formtarget="_blank" class="btn btn-outline-primary">
+            <i class="bi bi-printer"></i> Imprimir
+          </button>
         </div>
       </form>
 
