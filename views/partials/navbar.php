@@ -60,6 +60,18 @@ $MENU = [
 
   // Empleados (Solo)
   ['label' => 'Empleados', 'href' => url('empleados.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
+
+  // Nuevo: Reportes Agrupados
+  [
+    'label' => 'Reportes',
+    'id'    => 'navReportes',
+    'roles' => ['ADMIN','DEPOSITO','CAJA','RRHH'], // Unión de permisos relevantes
+    'items' => [
+      ['label' => 'Reportes Stock', 'href' => url('stock_reportes.php'),      'roles' => ['ADMIN','DEPOSITO','RRHH']],
+      ['label' => 'Reporte Caja',   'href' => url('caja.php?tab=reportes'),   'roles' => ['ADMIN','CAJA']],
+      ['label' => 'Reporte Compras','href' => url('compras.php'),             'roles' => ['ADMIN','CAJA','RRHH']],
+    ]
+  ],
 ];
 
 // Note: Se ha cambiado el nombre del item de menú de 'Productos' a 'Materias Primas' y se agregó 'Productos Terminados'.
