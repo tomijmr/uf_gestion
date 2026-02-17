@@ -17,20 +17,49 @@ if (!function_exists('can')) {
 
 /** Definición de menú por roles (fácil de ajustar) */
 $MENU = [
-  ['label' => 'Dashboard',           'href' => url('dashboard.php'),            'roles' => ['*']], // * = todos logueados
-  ['label' => 'Clientes',            'href' => url('clientes.php'),             'roles' => ['ADMIN','VENTAS','LECTURA','RRHH']],
-  ['label' => 'Pedidos',             'href' => url('pedidos.php'),              'roles' => ['ADMIN','VENTAS','RRHH']],
-  // Menú de Inventario dividido:
-  ['label' => 'Materiales',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
-  ['label' => 'Maquinas',            'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
-  ['label' => 'Stock',               'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO','RRHH']],
-  ['label' => 'Stock MP',            'href' => url('materias_primas_stock.php'), 'roles' => ['ADMIN','DEPOSITO','RRHH']],
-  ['label' => 'Reportes Stock',      'href' => url('stock_reportes.php'),       'roles' => ['ADMIN','DEPOSITO','RRHH']],
- # ['label' => 'Producción',          'href' => url('op.php'),                   'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
-  ['label' => 'Producción',    'href' => url('panel_produccion.php'),     'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
-  ['label' => 'Compras',             'href' => url('compras.php'),              'roles' => ['ADMIN','CAJA','RRHH']],
-  ['label' => 'Caja',                'href' => url('caja.php'),                 'roles' => ['ADMIN','CAJA']],
-  ['label' => 'Empleados',           'href' => url('empleados.php'),            'roles' => ['ADMIN','CAJA','RRHH']],
+  ['label' => 'Dashboard', 'href' => url('dashboard.php'), 'roles' => ['*']],
+  
+  // Categoría: Clientes
+  [
+    'label' => 'Clientes',
+    'id'    => 'navClientes',
+    'roles' => ['ADMIN','VENTAS','LECTURA','RRHH'],
+    'items' => [
+      ['label' => 'Clientes', 'href' => url('clientes.php'), 'roles' => ['ADMIN','VENTAS','LECTURA','RRHH']],
+      ['label' => 'Pedidos',  'href' => url('pedidos.php'),  'roles' => ['ADMIN','VENTAS','RRHH']],
+    ]
+  ],
+
+  // Categoría: Maquinas (Inventario)
+  [
+    'label' => 'Maquinas',
+    'id'    => 'navMaquinas',
+    'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH'],
+    'items' => [
+      ['label' => 'Materiales',     'href' => url('productos.php'),            'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']], 
+      ['label' => 'Stock',          'href' => url('stock.php'),                'roles' => ['ADMIN','DEPOSITO','RRHH']],
+      ['label' => 'Stock MP',       'href' => url('materias_primas_stock.php'),'roles' => ['ADMIN','DEPOSITO','RRHH']],
+      ['label' => 'Reportes Stock', 'href' => url('stock_reportes.php'),       'roles' => ['ADMIN','DEPOSITO','RRHH']],
+      ['label' => 'Maquinas',       'href' => url('productos_terminados.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','LECTURA','RRHH']],
+    ]
+  ],
+
+  // Producción (Solo)
+  ['label' => 'Producción', 'href' => url('panel_produccion.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH']],
+
+  // Categoría: Caja
+  [
+    'label' => 'Caja',
+    'id'    => 'navCaja',
+    'roles' => ['ADMIN','CAJA','RRHH'],
+    'items' => [
+      ['label' => 'Caja',      'href' => url('caja.php'),      'roles' => ['ADMIN','CAJA']],
+      ['label' => 'Compras',   'href' => url('compras.php'),   'roles' => ['ADMIN','CAJA','RRHH']],
+    ]
+  ],
+
+  // Empleados (Solo)
+  ['label' => 'Empleados', 'href' => url('empleados.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
 ];
 
 // Note: Se ha cambiado el nombre del item de menú de 'Productos' a 'Materias Primas' y se agregó 'Productos Terminados'.
@@ -47,12 +76,32 @@ $MENU = [
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         <?php foreach ($MENU as $item): ?>
           <?php
-            $allowed = in_array('*', $item['roles'], true) ? (bool)$user : can(...$item['roles']);
-            if (!$allowed) continue;
+            // Lógica unificada de roles
+            $has_role = in_array('*', $item['roles'] ?? [], true) ? (bool)$user : can(...($item['roles'] ?? []));
+            if (!$has_role) continue;
+
+            // Verificamos si es un dropdown (tiene 'items')
+            if (isset($item['items']) && is_array($item['items'])):
           ?>
-          <li class="nav-item">
-            <a class="nav-link" href="<?= $item['href'] ?>"><?= e($item['label']) ?></a>
-          </li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" id="<?= $item['id'] ?? 'navDrop' ?>" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <?= e($item['label']) ?>
+              </a>
+              <ul class="dropdown-menu" aria-labelledby="<?= $item['id'] ?? 'navDrop' ?>">
+                <?php foreach ($item['items'] as $sub): ?>
+                  <?php
+                    $sub_allowed = in_array('*', $sub['roles'] ?? [], true) ? (bool)$user : can(...($sub['roles'] ?? []));
+                    if (!$sub_allowed) continue;
+                  ?>
+                  <li><a class="dropdown-item" href="<?= $sub['href'] ?>"><?= e($sub['label']) ?></a></li>
+                <?php endforeach; ?>
+              </ul>
+            </li>
+          <?php else: ?>
+            <li class="nav-item">
+              <a class="nav-link" href="<?= $item['href'] ?>"><?= e($item['label']) ?></a>
+            </li>
+          <?php endif; ?>
         <?php endforeach; ?>
 
         <?php if (function_exists('is_admin') && is_admin()): ?>
