@@ -88,7 +88,7 @@ $limit = 20;
 $off   = ($page - 1) * $limit;
 
 // Build WHERE
-$where = [];
+$where = ["o.estado != 'PRESUPUESTO'"]; // Excluir presupuestos
 $params = [];
 
 if ($estado !== '' && in_array($estado, $estados, true)) {
@@ -176,7 +176,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 <div class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0">Pedidos</h5>
-    <a class="btn btn-primary" href="<?= url('pedido_nuevo.php') ?>">Nuevo Pedido</a>
+    <a class="btn btn-primary" href="<?= url('pedido_nuevo.php?type=pedido') ?>">Nuevo Pedido</a>
   </div>
 
   <?php if ($flash_ok): ?>

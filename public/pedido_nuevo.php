@@ -206,8 +206,26 @@ if (!isset($_SESSION['pedido'])) {
     'bank_account_id' => null,
     'third_party_name' => '',
     'fecha_entrega' => '',
-    'dias_entrega' => '',    'incluye_iva' => 1,  ];
+    'dias_entrega' => '',
+    'incluye_iva' => 1,
+    'type' => 'PEDIDO', // NEW: PEDIDO or PRESUPUESTO
+  ];
 }
+// Detectar si estamos creando un presupuesto o pedido normal
+if (isset($_GET['type'])) {
+    if ($_GET['type'] === 'presupuesto') {
+        $_SESSION['pedido']['type'] = 'PRESUPUESTO';
+    } else {
+        $_SESSION['pedido']['type'] = 'PEDIDO';
+    }
+}
+// Si no viene $_GET['type'] pero estamos empezando (items vacios, etc), asumimos Pedido normal?
+// No, mejor dejar persistencia en sesion para los pasos intermedios que no envían ?type=...
+// Pero si vengo "fresco" desde el menú, debería resetearse. 
+// Normalmente el link del menú debería tener un parametro de reset.
+// Por ahora, asumimos que los links de entrada tienen ?type=... o ?reset=1 (no implementado).
+// Los links de Navbar apuntan a pedido_nuevo.php sin parms para "Pedidos".
+
 $P =& $_SESSION['pedido'];
 
 function pedido_total_bruto(array $items): float {
@@ -219,7 +237,53 @@ $step = max(1, min(3, (int)($_GET['step'] ?? 1)));
 // ---------- Acciones POST ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-  // Seleccionar cliente
+  // --- NUEVA ACCIÓN: GUARDAR PRESUPUESTO ---
+  if (($_POST['action'] ?? '') === 'save_budget') {
+    $error = '';
+    if (!$P['customer_id']) $error = 'Debes seleccionar un cliente.';
+    if (empty($P['items'])) $error = 'El presupuesto no tiene ítems.';
+
+    if (empty($error)) {
+      try {
+        db()->beginTransaction();
+
+        $total_bruto = pedido_total_bruto($P['items']);
+        $descuento   = 0.0;
+        $total_neto  = $total_bruto - $descuento;
+        $senia       = 0; // Presupuestos no suelen tener seña, o sí? Asumamos 0 por ahora o la que pongan. 
+        $saldo       = max(0, $total_neto - $senia);
+        $incluye_iva = $P['incluye_iva'] ?? 1;
+
+        // Crear pedido con estado PRESUPUESTO
+        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        db()->prepare($sqlOrder)->execute([
+          $P['customer_id'], date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'PRESUPUESTO',
+          $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
+          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $incluye_iva
+        ]);
+        $order_id = (int)db()->lastInsertId();
+
+        // Ítems (sin reservar stock)
+        $sqlItem = "INSERT INTO order_items (order_id, product_id, cant, precio_unit, subtotal) VALUES (?,?,?,?,?)";
+        $stmtItem = db()->prepare($sqlItem);
+        foreach ($P['items'] as $it) {
+          $stmtItem->execute([$order_id, $it['product_id'], $it['cant'], $it['precio'], $it['subtotal']]);
+        }
+
+        db()->commit();
+        unset($_SESSION['pedido']);
+        header('Location: ' . url('presupuestos.php?ok=presupuesto_creado&id=' . $order_id));
+        exit;
+
+      } catch (Throwable $e) {
+        db()->rollBack();
+        $error = 'Error al guardar presupuesto: ' . $e->getMessage();
+      }
+    }
+  }
+
+  // --- ACCIÓN ORIGINAL: SELECCIONAR CLIENTE ---
   if (($_POST['action'] ?? '') === 'select_customer') {
     $P['customer_id'] = (int)($_POST['customer_id'] ?? 0);
     $step = 2;
@@ -940,21 +1004,37 @@ if ($step === 3):
         <div class="card shadow-sm">
           <div class="card-body">
             <h6 class="mb-3">Confirmación</h6>
-            <?php if ($order_id_export): ?>
-              <a class="btn btn-outline-success w-100 mb-2" target="_blank"
-                 href="<?= url('pedido_nuevo.php?export_presupuesto=1&order_id=' . $order_id_export) ?>">
-                Exportar presupuesto
-              </a>
-            <?php else: ?>
+            <?php if (isset($P['type']) && $P['type'] === 'PRESUPUESTO'): ?>
               <a class="btn btn-outline-success w-100 mb-2" target="_blank"
                  href="<?= url('pedido_nuevo.php?export_presupuesto=1') ?>">
-                Exportar presupuesto
+                Previsualizar PDF
               </a>
+              <!-- Botones Presupuesto -->
+              <form method="post" class="mb-2">
+                <input type="hidden" name="action" value="save_budget">
+                <button class="btn btn-primary w-100">
+                  <i class="bi bi-save"></i> Guardar Presupuesto
+                </button>
+              </form>
+            <?php else: ?>
+              <!-- Botones Pedido Normal -->
+              <?php if ($order_id_export): ?>
+                <a class="btn btn-outline-success w-100 mb-2" target="_blank"
+                   href="<?= url('pedido_nuevo.php?export_presupuesto=1&order_id=' . $order_id_export) ?>">
+                  Exportar presupuesto
+                </a>
+              <?php else: ?>
+                <a class="btn btn-outline-success w-100 mb-2" target="_blank"
+                   href="<?= url('pedido_nuevo.php?export_presupuesto=1') ?>">
+                  Exportar presupuesto
+                </a>
+              <?php endif; ?>
+              
+              <form method="post">
+                <input type="hidden" name="action" value="confirm_order">
+                <button class="btn btn-primary w-100">Confirmar pedido</button>
+              </form>
             <?php endif; ?>
-            <form method="post">
-              <input type="hidden" name="action" value="confirm_order">
-              <button class="btn btn-primary w-100">Confirmar pedido</button>
-            </form>
           </div>
         </div>
       </div>

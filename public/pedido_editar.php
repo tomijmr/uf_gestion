@@ -163,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     unset($it);
   }
 
-  if ($action === 'save_order') {
+  if ($action === 'save_order' || $action === 'convert_to_order') {
     if (empty($P['items'])) {
       $flash_err = 'El pedido no tiene items.';
     } else {
@@ -179,6 +179,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           throw new Exception('El pedido ya fue entregado/cerrado y no puede editarse.');
         }
 
+        $convertToOrder = ($action === 'convert_to_order');
+        if ($convertToOrder && $ord['estado'] !== 'PRESUPUESTO') {
+            throw new Exception('Solo se pueden convertir presupuestos.');
+        }
+
         $sOP = db()->prepare("SELECT COUNT(*) AS c FROM production_orders WHERE order_id=? AND estado IN ('EN_CURSO','FINALIZADA')");
         $sOP->execute([$order_id]);
         $opBusy = (int)($sOP->fetch()['c'] ?? 0);
@@ -186,20 +191,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           throw new Exception('Hay ordenes de produccion en curso/finalizadas.');
         }
 
-        // Liberar reservas anteriores
-        $sOld = db()->prepare("SELECT oi.product_id, oi.cant
-                               FROM order_items oi
-                               JOIN products p ON p.id=oi.product_id
-                               WHERE oi.order_id=? AND p.tipo='PT' FOR UPDATE");
-        $sOld->execute([$order_id]);
-        $oldItems = $sOld->fetchAll();
-        $updRel = db()->prepare("UPDATE products SET stock_reservado = GREATEST(stock_reservado - ?, 0) WHERE id=?");
-        foreach ($oldItems as $it) {
-          $updRel->execute([(float)$it['cant'], (int)$it['product_id']]);
+        $isPresupuesto = ($ord['estado'] === 'PRESUPUESTO') && !$convertToOrder;
+        $wasPresupuesto = ($ord['estado'] === 'PRESUPUESTO'); 
+
+        // Liberar reservas anteriores (SOLO SI NO ERA PRESUPUESTO)
+        if (!$wasPresupuesto) {
+            $sOld = db()->prepare("SELECT oi.product_id, oi.cant
+                                   FROM order_items oi
+                                   JOIN products p ON p.id=oi.product_id
+                                   WHERE oi.order_id=? AND p.tipo='PT' FOR UPDATE");
+            $sOld->execute([$order_id]);
+            $oldItems = $sOld->fetchAll();
+            $updRel = db()->prepare("UPDATE products SET stock_reservado = GREATEST(stock_reservado - ?, 0) WHERE id=?");
+            foreach ($oldItems as $it) {
+              $updRel->execute([(float)$it['cant'], (int)$it['product_id']]);
+            }
+            
+            db()->prepare("DELETE FROM production_orders WHERE order_id=? AND estado IN ('PENDIENTE','OBSERVADA')")
+              ->execute([$order_id]);
         }
 
-        db()->prepare("DELETE FROM production_orders WHERE order_id=? AND estado IN ('PENDIENTE','OBSERVADA')")
-          ->execute([$order_id]);
         db()->prepare("DELETE FROM order_items WHERE order_id=?")
           ->execute([$order_id]);
 
@@ -210,29 +221,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Reservas y OP nuevamente
         $estadoFinal = 'LISTO_ENTREGA';
-        $sqlGetProd = db()->prepare("SELECT id, tipo, stock_actual, stock_reservado FROM products WHERE id=? FOR UPDATE");
-        $sqlUpdReserva = db()->prepare("UPDATE products SET stock_reservado = stock_reservado + ? WHERE id=?");
-        $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, cantidad, estado) VALUES (?,?,?,'PENDIENTE')");
+        
+        if ($isPresupuesto) {
+            $estadoFinal = 'PRESUPUESTO';
+        } else {
+            $sqlGetProd = db()->prepare("SELECT id, tipo, stock_actual, stock_reservado FROM products WHERE id=? FOR UPDATE");
+            $sqlUpdReserva = db()->prepare("UPDATE products SET stock_reservado = stock_reservado + ? WHERE id=?");
+            $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, cantidad, estado) VALUES (?,?,?,'PENDIENTE')");
 
-        foreach ($P['items'] as $it) {
-          $pid = (int)$it['product_id'];
-          $cant = (float)$it['cant'];
-          $sqlGetProd->execute([$pid]);
-          $prod = $sqlGetProd->fetch();
-          if (!$prod) continue;
+            foreach ($P['items'] as $it) {
+              $pid = (int)$it['product_id'];
+              $cant = (float)$it['cant'];
+              $sqlGetProd->execute([$pid]);
+              $prod = $sqlGetProd->fetch();
+              if (!$prod) continue;
 
-          if ($prod['tipo'] === 'PT') {
-            $disponible = (float)$prod['stock_actual'] - (float)$prod['stock_reservado'];
-            $aReservar = min($disponible, $cant);
-            if ($aReservar > 0) {
-              $sqlUpdReserva->execute([$aReservar, $pid]);
+              if ($prod['tipo'] === 'PT') {
+                $disponible = (float)$prod['stock_actual'] - (float)$prod['stock_reservado'];
+                $aReservar = min($disponible, $cant);
+                if ($aReservar > 0) {
+                  $sqlUpdReserva->execute([$aReservar, $pid]);
+                }
+                $faltante = $cant - $aReservar;
+                if ($faltante > 0) {
+                  $sqlOP->execute([$order_id, $pid, $faltante]);
+                  $estadoFinal = 'EN_PRODUCCION';
+                }
+              }
             }
-            $faltante = $cant - $aReservar;
-            if ($faltante > 0) {
-              $sqlOP->execute([$order_id, $pid, $faltante]);
-              $estadoFinal = 'EN_PRODUCCION';
-            }
-          }
         }
 
         $total_bruto = pedido_edit_total_bruto($P['items']);
@@ -245,7 +261,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->execute([$total_bruto, $total_neto, $saldo, $estadoFinal, $order_id]);
 
         $diff = $total_neto - (float)$ord['total_neto'];
-        if (abs($diff) > 0.00001) {
+        
+        // Ledger update
+        if ($wasPresupuesto && !$isPresupuesto) {
+             // Conversion: Charge FULL amount
+             $cid = (int)$ord['customer_id'];
+             $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
+                                      FROM customer_ledger WHERE customer_id=?");
+             $stmtSaldo->execute([$cid]);
+             $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
+             $saldoResult = $saldoAnterior + $total_neto;
+             
+             db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
+                         VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $total_neto, $saldoResult]);
+
+        } elseif (!$wasPresupuesto && !$isPresupuesto && abs($diff) > 0.00001) {
           $cid = (int)$ord['customer_id'];
           $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
                                       FROM customer_ledger WHERE customer_id=?");
@@ -258,6 +289,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
                          VALUES (?,?,?,?,?,?,?,?)")
             ->execute([$cid, date('Y-m-d H:i:s'), $tipo, 'AJUSTE', $order_id, 'Ajuste pedido #'.$order_id, $monto, $saldoResult]);
+        }
+        
+        if ($convertToOrder) {
+            unset($_SESSION['pedido_edit'][$order_id]); // Clear edit session
         }
 
         db()->commit();
@@ -350,10 +385,18 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h6 class="mb-0">Items del pedido</h6>
-        <form method="post">
-          <input type="hidden" name="action" value="save_order">
-          <button class="btn btn-success btn-sm">Guardar cambios</button>
-        </form>
+        <div class="d-flex gap-2">
+          <?php if ($order['estado'] === 'PRESUPUESTO'): ?>
+            <form method="post" onsubmit="return confirm('¿Confirmar pedido y reservar stock?');">
+              <input type="hidden" name="action" value="convert_to_order">
+              <button class="btn btn-warning btn-sm">Convertir a Pedido</button>
+            </form>
+          <?php endif; ?>
+          <form method="post">
+            <input type="hidden" name="action" value="save_order">
+            <button class="btn btn-success btn-sm">Guardar cambios</button>
+          </form>
+        </div>
       </div>
 
       <?php if (!$items): ?>
