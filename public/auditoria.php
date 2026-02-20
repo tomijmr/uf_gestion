@@ -191,8 +191,14 @@ include __DIR__ . '/../views/partials/navbar.php';
             <span class="text-muted">–</span>
             <input type="date" name="end_date" class="form-control form-control-sm" value="<?= $end_date ?>">
             <button class="btn btn-primary btn-sm px-3">Actualizar</button>
-            <a href="auditoria.php" class="btn btn-outline-secondary btn-sm" title="Mes actual"><i class="bi bi-arrow-clockwise"></i></a>
+            <a href="auditoria.php" class="btn btn-outline-secondary btn-sm" title="Mes actual">
+                <i class="bi bi-arrow-clockwise"></i> Mes Actual
+            </a>
         </form>
+        
+        <button onclick="window.print()" class="btn btn-dark btn-sm d-flex align-items-center gap-2">
+            <i class="bi bi-printer-fill"></i> Imprimir Reporte
+        </button>
     </div>
 
     <!-- KPIs Principales -->
@@ -386,8 +392,13 @@ include __DIR__ . '/../views/partials/navbar.php';
 <!-- Print Styles -->
 <style>
 @media print {
+    @page {
+        size: A4 landscape;
+        margin: 1cm;
+    }
+    
     /* Hide non-essential elements */
-    nav, .btn, form, footer, .bi-arrow-clockwise {
+    nav, .btn, form, footer, .bi-arrow-clockwise, button, a {
         display: none !important;
     }
     /* Expand container */
