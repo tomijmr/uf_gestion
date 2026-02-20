@@ -546,8 +546,8 @@ include __DIR__ . '/../views/partials/navbar.php';
                             }
 
                             // 3. Gastos (Expenses - Cash & General)
-                            // General
-                            $sqlExp = "SELECT fecha, 'GASTO' as tipo, categoria, descripcion, importe FROM expenses WHERE fecha >= ? AND fecha <= ?";
+                            // General - 'expenses' usa 'detalle', 'cash_expenses' usa 'descripcion'
+                            $sqlExp = "SELECT fecha, 'GASTO' as tipo, categoria, detalle as descripcion, importe FROM expenses WHERE fecha >= ? AND fecha <= ?";
                             $stmt = $db->prepare($sqlExp);
                             $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
                             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
