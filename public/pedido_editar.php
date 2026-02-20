@@ -15,9 +15,9 @@ $flash_ok = '';
 $flash_err = '';
 
 function load_order(int $order_id) {
-  $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente
+  $stmt = db()->prepare("SELECT o.*, COALESCE(c.nombre, o.cliente_manual) AS cliente
                          FROM orders o
-                         JOIN customers c ON c.id=o.customer_id
+                         LEFT JOIN customers c ON c.id=o.customer_id
                          WHERE o.id=?");
   $stmt->execute([$order_id]);
   return $stmt->fetch(PDO::FETCH_ASSOC);
@@ -164,6 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   if ($action === 'save_order' || $action === 'convert_to_order') {
+    $convertToOrder = ($action === 'convert_to_order');
+    
     if (empty($P['items'])) {
       $flash_err = 'El pedido no tiene items.';
     } else {
@@ -179,9 +181,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           throw new Exception('El pedido ya fue entregado/cerrado y no puede editarse.');
         }
 
-        $convertToOrder = ($action === 'convert_to_order');
-        if ($convertToOrder && $ord['estado'] !== 'PRESUPUESTO') {
-            throw new Exception('Solo se pueden convertir presupuestos.');
+        if ($convertToOrder) {
+            $isManual = !empty($ord['cliente_manual']);
+            if (!$ord['customer_id'] && !$isManual) {
+                // Si no tiene ID y no es manual (caso extraño, quizas error en migracion)
+                throw new Exception('El pedido no tiene cliente asignado.');
+            }
+        
+            if ($ord['estado'] !== 'PRESUPUESTO') {
+                throw new Exception('Solo se pueden convertir presupuestos.');
+            }
         }
 
         $sOP = db()->prepare("SELECT COUNT(*) AS c FROM production_orders WHERE order_id=? AND estado IN ('EN_CURSO','FINALIZADA')");
@@ -262,33 +271,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $diff = $total_neto - (float)$ord['total_neto'];
         
-        // Ledger update
-        if ($wasPresupuesto && !$isPresupuesto) {
-             // Conversion: Charge FULL amount
-             $cid = (int)$ord['customer_id'];
-             $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
-                                      FROM customer_ledger WHERE customer_id=?");
-             $stmtSaldo->execute([$cid]);
-             $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
-             $saldoResult = $saldoAnterior + $total_neto;
-             
-             db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
-                         VALUES (?,?,?,?,?,?,?,?)")
-            ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $total_neto, $saldoResult]);
+        // Ledger update - ONLY if valid customer
+        if ($ord['customer_id']) {
+            if ($wasPresupuesto && !$isPresupuesto) {
+                 // Conversion: Charge FULL amount
+                 $cid = (int)$ord['customer_id'];
+                 $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
+                                          FROM customer_ledger WHERE customer_id=?");
+                 $stmtSaldo->execute([$cid]);
+                 $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
+                 $saldoResult = $saldoAnterior + $total_neto;
+                 
+                 db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
+                             VALUES (?,?,?,?,?,?,?,?)")
+                ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $total_neto, $saldoResult]);
 
-        } elseif (!$wasPresupuesto && !$isPresupuesto && abs($diff) > 0.00001) {
-          $cid = (int)$ord['customer_id'];
-          $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
-                                      FROM customer_ledger WHERE customer_id=?");
-          $stmtSaldo->execute([$cid]);
-          $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
-          $saldoResult = $saldoAnterior + $diff;
+            } elseif (!$wasPresupuesto && !$isPresupuesto && abs($diff) > 0.00001) {
+              $cid = (int)$ord['customer_id'];
+              $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
+                                          FROM customer_ledger WHERE customer_id=?");
+              $stmtSaldo->execute([$cid]);
+              $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
+              $saldoResult = $saldoAnterior + $diff;
 
-          $tipo = $diff >= 0 ? 'CARGO' : 'ABONO';
-          $monto = abs($diff);
-          db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
-                         VALUES (?,?,?,?,?,?,?,?)")
-            ->execute([$cid, date('Y-m-d H:i:s'), $tipo, 'AJUSTE', $order_id, 'Ajuste pedido #'.$order_id, $monto, $saldoResult]);
+              $tipo = $diff >= 0 ? 'CARGO' : 'ABONO';
+              $monto = abs($diff);
+              db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
+                             VALUES (?,?,?,?,?,?,?,?)")
+                ->execute([$cid, date('Y-m-d H:i:s'), $tipo, 'AJUSTE', $order_id, 'Ajuste pedido #'.$order_id, $monto, $saldoResult]);
+            }
         }
         
         if ($convertToOrder) {

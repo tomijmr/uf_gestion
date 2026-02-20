@@ -97,16 +97,19 @@ if ($estado !== '' && in_array($estado, $estados, true)) {
 }
 if ($q !== '') {
   if (ctype_digit($q)) {
-    $where[] = "(o.id = ? OR c.nombre LIKE ?)";
+    $where[] = "(o.id = ? OR c.nombre LIKE ? OR o.cliente_manual LIKE ?)";
     $params[] = (int)$q;
     $params[] = '%' . $q . '%';
+    $params[] = '%' . $q . '%';
   } else {
-    $where[] = "(c.nombre LIKE ?)";
+    $where[] = "(c.nombre LIKE ? OR o.cliente_manual LIKE ?)";
+    $params[] = '%' . $q . '%';
     $params[] = '%' . $q . '%';
   }
 }
 if ($fe_desde !== '') {
   $where[] = "DATE(o.fecha) >= ?";
+
   $params[] = $fe_desde;
 }
 if ($fe_hasta !== '') {
@@ -122,17 +125,17 @@ $orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
 // Totales
 $sqlCount = "SELECT COUNT(*) total
              FROM orders o
-             JOIN customers c ON c.id=o.customer_id
+             LEFT JOIN customers c ON c.id=o.customer_id
              $whereSql";
 $st = db()->prepare($sqlCount);
 $st->execute($params);
-$total = (int)$st->fetch()['total'];
+$total = (int)($st->fetch()['total'] ?? 0);
 $pages = max(1, (int)ceil($total / $limit));
 
 // Datos
-$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.transporte_bonificado, o.empresa_transporte, c.nombre AS cliente
+$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.transporte_bonificado, o.empresa_transporte, COALESCE(c.nombre, o.cliente_manual) AS cliente
         FROM orders o
-        JOIN customers c ON c.id=o.customer_id
+        LEFT JOIN customers c ON c.id=o.customer_id
         $whereSql
         ORDER BY o.fecha $orden_fecha, o.id $orden_fecha
         LIMIT $limit OFFSET $off";

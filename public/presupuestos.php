@@ -39,11 +39,13 @@ try {
 
 if ($q !== '') {
   if (ctype_digit($q)) {
-    $where[] = "(o.id = ? OR c.nombre LIKE ?)";
+    $where[] = "(o.id = ? OR c.nombre LIKE ? OR o.cliente_manual LIKE ?)";
     $params[] = (int)$q;
     $params[] = '%' . $q . '%';
+    $params[] = '%' . $q . '%';
   } else {
-    $where[] = "(c.nombre LIKE ?)";
+    $where[] = "(c.nombre LIKE ? OR o.cliente_manual LIKE ?)";
+    $params[] = '%' . $q . '%';
     $params[] = '%' . $q . '%';
   }
 }
@@ -63,7 +65,7 @@ $ordenSql = ($orden_fecha === 'ASC') ? 'ASC' : 'DESC';
 
 // Count
 $sqlCount = "SELECT COUNT(*) FROM orders o 
-             JOIN customers c ON c.id=o.customer_id 
+             LEFT JOIN customers c ON c.id=o.customer_id 
              WHERE $whereSql";
 $stmtC = db()->prepare($sqlCount);
 $stmtC->execute($params);
@@ -71,9 +73,9 @@ $total_rows = $stmtC->fetchColumn();
 $total_pages = ceil($total_rows / $limit);
 
 // Data
-$sql = "SELECT o.*, c.nombre as cliente 
+$sql = "SELECT o.*, COALESCE(c.nombre, o.cliente_manual) as cliente 
         FROM orders o
-        JOIN customers c ON c.id=o.customer_id
+        LEFT JOIN customers c ON c.id=o.customer_id
         WHERE $whereSql
         ORDER BY o.fecha $ordenSql
         LIMIT $limit OFFSET $off";

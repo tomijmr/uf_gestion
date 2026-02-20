@@ -32,7 +32,7 @@ if (isset($_GET['export_presupuesto'])) {
   if ($order_id) {
     $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
                            FROM orders o
-                           JOIN customers c ON c.id = o.customer_id
+                           LEFT JOIN customers c ON c.id = o.customer_id
                            WHERE o.id = ?");
     $stmt->execute([$order_id]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -41,6 +41,13 @@ if (isset($_GET['export_presupuesto'])) {
       http_response_code(404);
       echo "Presupuesto no encontrado";
       exit;
+    }
+    
+    // Si es manual, pisar cliente_nombre
+    if (!$order['customer_id'] && !empty($order['cliente_manual'])) {
+        $order['cliente_nombre'] = $order['cliente_manual'];
+        $order['telefono'] = $order['cliente_manual_contacto'] ?: '-';
+        $order['cuit_dni'] = '-';
     }
 
     $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
@@ -82,6 +89,10 @@ if (isset($_GET['export_presupuesto'])) {
       $order['cliente_nombre'] = $cli['nombre'];
       $order['cuit_dni'] = $cli['cuit_dni'];
       $order['telefono'] = $cli['telefono'];
+    } elseif (!empty($P['cliente_manual'])) {
+      $order['cliente_nombre'] = $P['cliente_manual'];
+      $order['cuit_dni'] = '-';
+      $order['telefono'] = $P['cliente_manual_contacto'] ?: '-';
     }
 
     $incluye_iva = (int)$order['incluye_iva'];
@@ -209,6 +220,8 @@ if (!isset($_SESSION['pedido'])) {
     'dias_entrega' => '',
     'incluye_iva' => 1,
     'type' => 'PEDIDO', // NEW: PEDIDO or PRESUPUESTO
+    'cliente_manual' => '', // NEW: Para presupuestos manuales
+    'cliente_manual_contacto' => '',
   ];
 }
 // Detectar si estamos creando un presupuesto o pedido normal
@@ -237,10 +250,25 @@ $step = max(1, min(3, (int)($_GET['step'] ?? 1)));
 // ---------- Acciones POST ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
+  // --- NUEVA ACCIÓN: SELECCIONAR CLIENTE MANUAL ---
+  if (($_POST['action'] ?? '') === 'select_manual_customer') {
+    $P['customer_id'] = null; // Clear ID so we use manual info
+    $P['cliente_manual'] = trim($_POST['cliente_manual'] ?? '');
+    $P['cliente_manual_contacto'] = trim($_POST['cliente_manual_contacto'] ?? '');
+    if ($P['cliente_manual'] !== '') {
+        $step = 2;
+    } else {
+        $error = "Debe ingresar al menos un nombre para el cliente manual.";
+    }
+  }
+
   // --- NUEVA ACCIÓN: GUARDAR PRESUPUESTO ---
   if (($_POST['action'] ?? '') === 'save_budget') {
     $error = '';
-    if (!$P['customer_id']) $error = 'Debes seleccionar un cliente.';
+    // Si no hay customer_id, debe haber cliente manual
+    if (!$P['customer_id'] && empty($P['cliente_manual'])) {
+        $error = 'Debes seleccionar un cliente o ingresar uno manual.';
+    }
     if (empty($P['items'])) $error = 'El presupuesto no tiene ítems.';
 
     if (empty($error)) {
@@ -255,10 +283,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $incluye_iva = $P['incluye_iva'] ?? 1;
 
         // Crear pedido con estado PRESUPUESTO
-        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, cliente_manual, cliente_manual_contacto, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         db()->prepare($sqlOrder)->execute([
-          $P['customer_id'], date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'PRESUPUESTO',
+          $P['customer_id'], 
+          $P['cliente_manual'] ?: null, 
+          $P['cliente_manual_contacto'] ?: null, 
+          date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'PRESUPUESTO',
           $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
           $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $incluye_iva
         ]);
@@ -616,14 +647,57 @@ if ($step === 1):
     <div class="mt-3">
       <a class="btn btn-outline-secondary" href="<?= url('clientes.php') ?>" target="_blank">+ Crear cliente nuevo</a>
     </div>
+
+    <!-- Opción de cliente manual para presupuestos -->
+    <?php if (isset($P['type']) && $P['type'] === 'PRESUPUESTO'): ?>
+      <hr class="my-4">
+      <div class="card shadow-sm border-warning">
+        <div class="card-header bg-warning text-dark">
+          <h6 class="mb-0"><i class="bi bi-person-exclamation"></i> Cliente Manual (Sin registrar)</h6>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-2">Si el cliente no está registrado y solo desea hacer un presupuesto rápido, ingrese sus datos aquí.</p>
+            <form method="post" class="row g-2 align-items-end">
+                <input type="hidden" name="action" value="select_manual_customer">
+                <div class="col-md-5">
+                    <label class="form-label">Nombre / Razón Social *</label>
+                    <input type="text" name="cliente_manual" class="form-control" required placeholder="Ej: Juan Pérez">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Contacto (Tel/Email)</label>
+                    <input type="text" name="cliente_manual_contacto" class="form-control" placeholder="Opcional">
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-warning w-100">Usar manual</button>
+                </div>
+            </form>
+        </div>
+      </div>
+    <?php endif; ?>
   </div>
 <?php endif; ?>
 
 <?php
 // Paso 2: Ítems
 if ($step === 2):
-  if (!$P['customer_id']) { header('Location: ' . url('pedido_nuevo.php') . '?step=1'); exit; }
-  $cli = getCliente($P['customer_id']);
+  // Check customer validation (manual or registered)
+  if (!$P['customer_id'] && empty($P['cliente_manual'])) { header('Location: ' . url('pedido_nuevo.php') . '?step=1'); exit; }
+  
+  $cli = null; 
+  if ($P['customer_id']) {
+      $cli = getCliente($P['customer_id']);
+      if (!$cli) {
+          unset($_SESSION['pedido']['customer_id']);
+          header('Location: ' . url('pedido_nuevo.php') . '?step=1'); 
+          exit; 
+      }
+      $clientName = $cli['nombre'];
+      $clientId = $cli['id'];
+  } else {
+      $clientName = ($P['cliente_manual'] ?? '') . ' (Manual)';
+      $clientId = null;
+  }
+  
   $q = trim($_GET['q'] ?? '');
 
   // Ahora SIEMPRE mostramos productos: si no hay búsqueda, listamos los primeros 30 PT
@@ -644,7 +718,7 @@ if ($step === 2):
   ?>
   <div class="container py-4">
     <h5 class="mb-1">Nuevo Pedido — Paso 2: Ítems</h5>
-    <div class="text-muted mb-3">Cliente: <strong><?= e($cli['nombre'] ?? '') ?></strong> (ID <?= (int)$P['customer_id'] ?>)</div>
+    <div class="text-muted mb-3">Cliente: <strong><?= e($clientName) ?></strong> <?= $clientId ? '(ID ' . (int)$clientId . ')' : '' ?></div>
 
     <!-- Buscar productos -->
     <form class="row g-2 mb-3" method="get" action="<?= url('pedido_nuevo.php') ?>">
@@ -770,22 +844,56 @@ if ($step === 2):
 <?php
 // Paso 3: Pago + Confirmación
 if ($step === 3):
-  $order_id_export = (int)($_GET['order_id'] ?? 0);
-  if (!$P['customer_id'] && !$order_id_export) { header('Location: ' . url('pedido_nuevo.php') . '?step=1'); exit; }
-  if (!$P['items'] && !$order_id_export) { header('Location: ' . url('pedido_nuevo.php') . '?step=2'); exit; }
-  $cli = $P['customer_id'] ? getCliente($P['customer_id']) : null;
-  $total = $P['items'] ? pedido_total_bruto($P['items']) : 0;
-  $descuento = 0; $neto = $total - $descuento;
-  $senia = (float)$P['senia']; $saldo = max(0, $neto - $senia);
+    $order_id_export = (int)($_GET['order_id'] ?? 0);
+    // DEBUG SESSION
+    // echo "P ID: " . ($P['customer_id'] ?? 'NULL') . "\n";
+    // echo "P MANUAL: " . ($P['cliente_manual'] ?? 'NULL') . "\n";
+    // exit;
+    
+    // Validation: Must have customer (ID or manual) OR be an export view
+  if (!$P['customer_id'] && empty($P['cliente_manual']) && !$order_id_export) { 
+      header('Location: ' . url('pedido_nuevo.php') . '?step=1'); 
+      exit; 
+  }
+  
+  if (empty($P['items']) && !$order_id_export) { 
+      header('Location: ' . url('pedido_nuevo.php') . '?step=2'); 
+      exit; 
+  }
+
+  $cli = null;
+  if ($P['customer_id']) {
+      $cli = getCliente($P['customer_id']);
+  } elseif (!empty($P['cliente_manual'])) {
+      // Create fake CLI array for display
+       $cli = [
+        'nombre' => $P['cliente_manual'] . ' (Manual)',
+        'cuit_dni' => '-',
+        'telefono' => $P['cliente_manual_contacto'] ?: '-',
+        'id' => null,
+      ];
+  }
+
+  $total = !empty($P['items']) ? pedido_total_bruto($P['items']) : 0;
+  $descuento = 0; 
+  $neto = $total - $descuento;
+  $senia = (float)($P['senia'] ?? 0); 
+  $saldo = max(0, $neto - $senia);
   $items_view = $P['items'];
 
   if ($order_id_export) {
-    $stmtOrder = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
+    // UPDATED QUERY FOR MANUAL CLIENTS
+    $stmtOrder = db()->prepare("SELECT o.*, COALESCE(c.nombre, o.cliente_manual) AS cliente_nombre, c.cuit_dni, c.telefono, o.cliente_manual_contacto
                                 FROM orders o
-                                JOIN customers c ON c.id = o.customer_id
+                                LEFT JOIN customers c ON c.id = o.customer_id
                                 WHERE o.id = ?");
     $stmtOrder->execute([$order_id_export]);
     if ($order_export = $stmtOrder->fetch(PDO::FETCH_ASSOC)) {
+      if (empty($order_export['cuit_dni'])) {
+           // Si es manual
+           $order_export['telefono'] = $order_export['cliente_manual_contacto'];
+           $order_export['cuit_dni'] = '-';
+      }
       $cli = [
         'nombre' => $order_export['cliente_nombre'],
         'cuit_dni' => $order_export['cuit_dni'],
@@ -805,15 +913,31 @@ if ($step === 3):
       $stmtItems->execute([$order_id_export]);
       $items_view = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
     }
+  } else {
+    // Si NO es export, definir $cli correctamente para display
+    if ($P['customer_id']) {
+        $cli = getCliente($P['customer_id']);
+    } elseif (!empty($P['cliente_manual'])) {
+        $cli = [
+            'nombre' => $P['cliente_manual'] . ' (Manual)',
+            'cuit_dni' => '-',
+            'telefono' => $P['cliente_manual_contacto'] ?: '-',
+            'id' => null,
+        ];
+    }
   }
   
   // Cargar cuentas bancarias
   $bank_accounts = db()->query("SELECT id, nombre FROM bank_accounts WHERE activo=1 ORDER BY nombre")->fetchAll();
-  $cliente_id_display = $P['customer_id'] ?: ($cli['id'] ?? null);
+
+  // Prepare display variables
+  $clientName = $cli['nombre'] ?? 'Desconocido';
+  $clientId   = $cli['id'] ?? null;
+
   ?>
   <div class="container py-4">
     <h5 class="mb-1">Nuevo Pedido — Paso 3: Pago y Confirmación</h5>
-    <div class="text-muted mb-3">Cliente: <strong><?= e($cli['nombre'] ?? '') ?></strong><?= $cliente_id_display ? ' (ID ' . (int)$cliente_id_display . ')' : '' ?></div>
+    <div class="text-muted mb-3">Cliente: <strong><?= e($clientName) ?></strong> <?= $clientId ? '(ID ' . (int)$clientId . ')' : '' ?></div>
 
     <?php if (!empty($error)): ?>
       <div class="alert alert-danger"><?= e($error) ?></div>
@@ -1004,7 +1128,12 @@ if ($step === 3):
         <div class="card shadow-sm">
           <div class="card-body">
             <h6 class="mb-3">Confirmación</h6>
-            <?php if (isset($P['type']) && $P['type'] === 'PRESUPUESTO'): ?>
+            <?php 
+            // Si es tipo presupuesto O tiene cliente manual, forzamos modo presupuesto
+            $isBudget = (isset($P['type']) && $P['type'] === 'PRESUPUESTO') || !empty($P['cliente_manual']);
+            ?>
+            
+            <?php if ($isBudget): ?>
               <a class="btn btn-outline-success w-100 mb-2" target="_blank"
                  href="<?= url('pedido_nuevo.php?export_presupuesto=1') ?>">
                 Previsualizar PDF
