@@ -190,31 +190,37 @@ include __DIR__ . '/../views/partials/navbar.php';
 
 <div class="container-fluid py-4">
     <!-- Header y Filtros -->
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-        <h2 class="mb-0 fw-bold text-primary"><i class="bi bi-bar-chart-line-fill"></i> Auditoría y Reportes</h2>
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
+        <h2 class="mb-0 fw-bold text-primary"><i class="bi bi-bar-chart-line-fill"></i> Auditoría</h2>
         
-        <form class="d-flex gap-2 bg-white p-2 rounded shadow-sm align-items-center" method="get">
-            <span class="text-muted small fw-bold">Período:</span>
-            <input type="date" name="start_date" class="form-control form-control-sm" value="<?= $start_date ?>">
-            <span class="text-muted">–</span>
-            <input type="date" name="end_date" class="form-control form-control-sm" value="<?= $end_date ?>">
-            <button class="btn btn-primary btn-sm px-3">Actualizar</button>
-            <a href="auditoria.php" class="btn btn-outline-secondary btn-sm" title="Mes actual">
-                <i class="bi bi-arrow-clockwise"></i> Mes Actual
-            </a>
-        </form>
-        
-        <button onclick="window.print()" class="btn btn-dark btn-sm d-flex align-items-center gap-2">
-            <i class="bi bi-printer-fill"></i> Imprimir Reporte
-        </button>
+        <div class="d-flex flex-column flex-sm-row gap-2 w-100 w-md-auto">
+            <form class="d-flex flex-column flex-sm-row gap-2 bg-white p-2 rounded shadow-sm align-items-center w-100" method="get">
+                <div class="d-flex align-items-center gap-2 w-100">
+                    <span class="text-muted small fw-bold d-none d-sm-inline">Del:</span>
+                    <input type="date" name="start_date" class="form-control form-control-sm" value="<?= $start_date ?>">
+                    <span class="text-muted small fw-bold d-none d-sm-inline">Al:</span>
+                    <input type="date" name="end_date" class="form-control form-control-sm" value="<?= $end_date ?>">
+                </div>
+                <div class="d-flex gap-2 w-100 w-sm-auto">
+                    <button class="btn btn-primary btn-sm flex-fill">Actualizar</button>
+                    <a href="auditoria.php" class="btn btn-outline-secondary btn-sm" title="Mes actual">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </a>
+                </div>
+            </form>
+            
+            <button onclick="window.print()" class="btn btn-dark btn-sm d-flex align-items-center justify-content-center gap-2">
+                <i class="bi bi-printer-fill"></i> <span class="d-none d-md-inline">Imprimir</span>
+            </button>
+        </div>
     </div>
 
     <!-- KPIs Principales -->
-    <div class="row g-3 mb-4">
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-3 mb-4">
         <!-- Ventas (Pedidos) -->
-        <div class="col-md-3">
+        <div class="col">
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-primary">
-                <div class="card-body">
+                <div class="card-body p-3">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Ventas (Facturado)</div>
                     <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
                     <div class="small mt-2 <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
@@ -225,9 +231,9 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
 
         <!-- Ingresos Reales (Caja) -->
-        <div class="col-md-3">
+        <div class="col">
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-success">
-                <div class="card-body">
+                <div class="card-body p-3">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Ingresos Reales (Caja)</div>
                     <h3 class="fw-bold text-dark mb-0"><?= money($current['cobros']) ?></h3>
                     <div class="small mt-2 text-muted">
@@ -238,9 +244,9 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
 
         <!-- Compras MP -->
-        <div class="col-md-3">
+        <div class="col">
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-warning">
-                <div class="card-body">
+                <div class="card-body p-3">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Compras (Materia Prima)</div>
                     <h3 class="fw-bold text-dark mb-0"><?= money($current['compras']) ?></h3>
                     <div class="small mt-2 <?= $var_compras <= 0 ? 'text-success' : 'text-danger' ?>">
@@ -251,9 +257,9 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
 
         <!-- Gastos Operativos -->
-        <div class="col-md-3">
+        <div class="col">
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-danger">
-                <div class="card-body">
+                <div class="card-body p-3">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Gastos Operativos</div>
                     <h3 class="fw-bold text-dark mb-0"><?= money($current['gastos']) ?></h3>
                     <div class="small mt-2 <?= $var_gastos <= 0 ? 'text-success' : 'text-danger' ?>">
@@ -274,15 +280,15 @@ include __DIR__ . '/../views/partials/navbar.php';
             
             $margen = $current['ventas'] > 0 ? ($neto / $current['ventas']) * 100 : 0;
         ?>
-        <div class="col-md-6">
+        <div class="col-12 col-md-6">
             <div class="card border-0 shadow-sm h-100 bg-primary text-white">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
+                <div class="card-body p-3 d-flex flex-column flex-sm-row justify-content-between align-items-center gap-3">
+                    <div class="text-center text-sm-start">
                         <div class="text-white-50 small text-uppercase fw-bold mb-1">Resultado Operativo (Ventas - Gastos)</div>
                         <h3 class="fw-bold mb-0"><?= money($neto) ?></h3>
                         <div class="small mt-1 text-white-50">Margen: <strong><?= number_format($margen, 1) ?>%</strong></div>
                     </div>
-                    <div class="text-end border-start ps-4 border-light">
+                    <div class="text-center text-sm-end border-top border-sm-start pt-3 pt-sm-0 ps-sm-4 border-light w-100 w-sm-auto">
                          <div class="text-white-50 small text-uppercase fw-bold mb-1">Flujo de Caja Real</div>
                          <h3 class="fw-bold mb-0" style="color: #6affad;"><?= money($cash_flow) ?></h3>
                          <div class="small mt-1 text-white-50">Cobros - Pagos</div>
@@ -292,21 +298,21 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
 
         <!-- Balance General (Actualizado para usar Cobros en lugar de Ventas si se desea ver flujo de caja, pero mantenemos ventas para balance economico) -->
-        <div class="col-md-6">
+        <div class="col-12 col-md-6">
             <div class="card border-0 shadow-sm h-100">
-                <div class="card-body d-flex flex-column justify-content-center pt-2 pb-2">
-                     <div class="row text-center align-items-center h-100">
+                <div class="card-body d-flex flex-column justify-content-center p-3">
+                     <div class="row text-center align-items-center h-100 g-2">
                         <div class="col-4 border-end">
-                            <small class="text-muted d-block mb-1">Total Entradas (Caja)</small>
-                            <span class="fw-bold text-success fs-5"><?= money($current['cobros']) ?></span>
+                            <small class="text-muted d-block mb-1" style="font-size: 0.75rem;">Total Entradas (Caja)</small>
+                            <span class="fw-bold text-success fs-6"><?= money($current['cobros']) ?></span>
                         </div>
                          <div class="col-4 border-end">
-                            <small class="text-muted d-block mb-1">Total Salidas</small>
-                            <span class="fw-bold text-danger fs-5"><?= money($current['compras'] + $current['gastos']) ?></span>
+                            <small class="text-muted d-block mb-1" style="font-size: 0.75rem;">Total Salidas</small>
+                            <span class="fw-bold text-danger fs-6"><?= money($current['compras'] + $current['gastos']) ?></span>
                         </div>
                         <div class="col-4">
-                            <small class="text-muted d-block mb-1">Resultado Financiero</small>
-                             <span class="fw-bold fs-5 <?= $cash_flow >= 0 ? 'text-primary' : 'text-danger' ?>"><?= money($cash_flow) ?></span>
+                            <small class="text-muted d-block mb-1" style="font-size: 0.75rem;">Resultado Financiero</small>
+                             <span class="fw-bold fs-6 <?= $cash_flow >= 0 ? 'text-primary' : 'text-danger' ?>"><?= money($cash_flow) ?></span>
                         </div>
                      </div>
                 </div>
