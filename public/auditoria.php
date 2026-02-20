@@ -4,551 +4,445 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
-$isPrint = isset($_GET['print']);
+// ---------- Filtros de Fecha ----------
+$start_date = $_GET['start_date'] ?? date('Y-m-01');
+$end_date   = $_GET['end_date'] ?? date('Y-m-t');
 
-// --------- RANGO DE FECHAS (PERÍODO ACTUAL) ----------
-$hoy = date('Y-m-d');
-$desde = $_GET['desde'] ?? date('Y-m-01');
-$hasta = $_GET['hasta'] ?? $hoy;
+// Calcular período anterior para comparar (mismo rango de días pero mes/año anterior o offset)
+$d1 = new DateTime($start_date);
+$d2 = new DateTime($end_date);
+$diff = $d1->diff($d2);
+// Ajuste para incluir el día final
+$days = $diff->days + 1;
 
-// Normalización básica
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $desde)) $desde = date('Y-m-01');
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $hasta)) $hasta = $hoy;
+// Periodo anterior exacto (misma cantidad de días hacia atrás)
+$prev_end_dt = (clone $d1)->modify('-1 day');
+$prev_end = $prev_end_dt->format('Y-m-d');
+$prev_start = (clone $prev_end_dt)->modify("-" . ($days - 1) . " days")->format('Y-m-d');
 
-// --------- PERÍODO ANTERIOR (MISMA DURACIÓN) ----------
-$dtDesde = new DateTime($desde);
-$dtHasta = new DateTime($hasta);
-$diffDays = $dtHasta->diff($dtDesde)->days + 1; // inclusive
+// Helper para obtener datos de un rango
+function get_audit_data($start, $end) {
+    $db = db();
+    $data = [
+        'ventas' => 0,
+        'compras' => 0, // Materia prima
+        'gastos' => 0,  // Gastos generales + caja chica
+        'gastos_categorias' => [],
+        'top_productos' => [],
+        'timeline' => [] // [fecha => [ingreso, egreso]]
+    ];
 
-$dtPrevHasta = clone $dtDesde;
-$dtPrevHasta->modify('-1 day');
-$dtPrevDesde = clone $dtPrevHasta;
-$dtPrevDesde->modify('-' . ($diffDays - 1) . ' day');
+    // 1. VENTAS (Orders confirmados/entregados/cerrados)
+    // Excluir PRESUPUESTO, BORRADOR, CANCELADO
+    $sqlVentas = "SELECT SUM(total_neto) as total FROM orders 
+                  WHERE fecha BETWEEN ? AND ? 
+                  AND estado NOT IN ('BORRADOR','PRESUPUESTO','CANCELADO')";
+    $stmt = $db->prepare($sqlVentas);
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $data['ventas'] = (float)($stmt->fetchColumn() ?? 0);
 
-$desdePrev = $dtPrevDesde->format('Y-m-d');
-$hastaPrev = $dtPrevHasta->format('Y-m-d');
+    // 2. COMPRAS (Purchases - Materia Prima)
+    $sqlCompras = "SELECT SUM(total) as total FROM purchases 
+                   WHERE fecha BETWEEN ? AND ?";
+    $stmt = $db->prepare($sqlCompras);
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $data['compras'] = (float)($stmt->fetchColumn() ?? 0);
 
-// ---------- INGRESOS POR PEDIDOS (PERÍODO ACTUAL / ANTERIOR) ----------
-$sqlOrdersBase = "
-  SELECT 
-    COALESCE(SUM(o.total_neto),0) AS total,
-    COUNT(*) AS cant
-  FROM orders o
-  WHERE DATE(o.fecha) BETWEEN :desde AND :hasta
-    AND o.estado <> 'BORRADOR'
-";
+    // 3. GASTOS VARIOS (Expenses table)
+    $stmt = $db->prepare("SELECT SUM(importe) as total, categoria FROM expenses 
+                  WHERE fecha BETWEEN ? AND ? GROUP BY categoria");
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as $r) {
+        $cat = $r['categoria'] ?: 'Sin Categoría';
+        $amount = (float)$r['total'];
+        $data['gastos'] += $amount;
+        $data['gastos_categorias'][$cat] = ($data['gastos_categorias'][$cat] ?? 0) + $amount;
+    }
 
-$st = db()->prepare($sqlOrdersBase);
-$st->execute([':desde' => $desde, ':hasta' => $hasta]);
-$ordersAct = $st->fetch(PDO::FETCH_ASSOC);
-$ingPedidosAct = (float)$ordersAct['total'];
-$cantPedidosAct = (int)$ordersAct['cant'];
+    // 4. CAJA CHICA (Cash Expenses) - Asumimos que son gastos también
+    $stmt = $db->prepare("SELECT SUM(importe) as total, categoria FROM cash_expenses 
+                WHERE fecha BETWEEN ? AND ? GROUP BY categoria");
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as $r) {
+        $cat = 'Caja: ' . ($r['categoria'] ?: 'Varios');
+        $amount = (float)$r['total'];
+        $data['gastos'] += $amount;
+        $data['gastos_categorias'][$cat] = ($data['gastos_categorias'][$cat] ?? 0) + $amount;
+    }
 
-$st->execute([':desde' => $desdePrev, ':hasta' => $hastaPrev]);
-$ordersPrev = $st->fetch(PDO::FETCH_ASSOC);
-$ingPedidosPrev = (float)$ordersPrev['total'];
-$cantPedidosPrev = (int)$ordersPrev['cant'];
+    // 5. TOP PRODUCTOS VENDIDOS
+    $sqlTop = "SELECT p.nombre, SUM(oi.cant) as cantidad, SUM(oi.subtotal) as total_vendido
+               FROM order_items oi
+               JOIN orders o ON o.id = oi.order_id
+               JOIN products p ON p.id = oi.product_id
+               WHERE o.fecha BETWEEN ? AND ?
+               AND o.estado NOT IN ('BORRADOR','PRESUPUESTO','CANCELADO')
+               GROUP BY p.id
+               ORDER BY total_vendido DESC
+               LIMIT 5";
+    $stmt = $db->prepare($sqlTop);
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $data['top_productos'] = $stmt->fetchAll();
 
-// ---------- INGRESOS POR PAGOS (PERÍODO ACTUAL / ANTERIOR) ----------
-$sqlPagos = "
-  SELECT COALESCE(SUM(importe),0) AS total
-  FROM payments
-  WHERE DATE(fecha) BETWEEN :desde AND :hasta
-";
-$stP = db()->prepare($sqlPagos);
-$stP->execute([':desde' => $desde, ':hasta' => $hasta]);
-$ingPagosAct = (float)$stP->fetchColumn();
-
-$stP->execute([':desde' => $desdePrev, ':hasta' => $hastaPrev]);
-$ingPagosPrev = (float)$stP->fetchColumn();
-
-// ---------- GASTOS (CASH_EXPENSES) POR CATEGORÍA (ACTUAL / ANTERIOR) ----------
-$sqlGastosCat = "
-  SELECT categoria, COALESCE(SUM(importe),0) AS total
-  FROM cash_expenses
-  WHERE DATE(fecha) BETWEEN :desde AND :hasta
-  GROUP BY categoria
-  ORDER BY total DESC
-";
-$stG = db()->prepare($sqlGastosCat);
-$stG->execute([':desde' => $desde, ':hasta' => $hasta]);
-$gastosCatAct = $stG->fetchAll(PDO::FETCH_ASSOC);
-
-$stG->execute([':desde' => $desdePrev, ':hasta' => $hastaPrev]);
-$gastosCatPrev = $stG->fetchAll(PDO::FETCH_ASSOC);
-
-// Totales de gasto (actual / anterior)
-$sqlGastosTotal = "
-  SELECT COALESCE(SUM(importe),0) AS total
-  FROM cash_expenses
-  WHERE DATE(fecha) BETWEEN :desde AND :hasta
-";
-$stGT = db()->prepare($sqlGastosTotal);
-$stGT->execute([':desde' => $desde, ':hasta' => $hasta]);
-$gastosTotalAct = (float)$stGT->fetchColumn();
-
-$stGT->execute([':desde' => $desdePrev, ':hasta' => $hastaPrev]);
-$gastosTotalPrev = (float)$stGT->fetchColumn();
-
-// ---------- TOP 5 MÁQUINAS (PT) VENDIDAS EN PERÍODO ACTUAL ----------
-$sqlTopPT = "
-  SELECT 
-    p.id,
-    p.codigo,
-    p.nombre,
-    SUM(oi.cant) AS unidades,
-    COALESCE(SUM(oi.subtotal),0) AS total_ventas
-  FROM order_items oi
-  JOIN orders o   ON o.id = oi.order_id
-  JOIN products p ON p.id = oi.product_id
-  WHERE 
-    DATE(o.fecha) BETWEEN :desde AND :hasta
-    AND o.estado <> 'BORRADOR'
-    AND p.tipo = 'PT'
-  GROUP BY p.id, p.codigo, p.nombre
-  ORDER BY unidades DESC
-  LIMIT 5
-";
-$stTop = db()->prepare($sqlTopPT);
-$stTop->execute([':desde' => $desde, ':hasta' => $hasta]);
-$topMaquinas = $stTop->fetchAll(PDO::FETCH_ASSOC);
-
-// Total máquinas vendidas (PT) en el período actual
-$sqlTotalPT = "
-  SELECT COALESCE(SUM(oi.cant),0) AS unidades
-  FROM order_items oi
-  JOIN orders o   ON o.id = oi.order_id
-  JOIN products p ON p.id = oi.product_id
-  WHERE 
-    DATE(o.fecha) BETWEEN :desde AND :hasta
-    AND o.estado <> 'BORRADOR'
-    AND p.tipo = 'PT'
-";
-$stTotPT = db()->prepare($sqlTotalPT);
-$stTotPT->execute([':desde' => $desde, ':hasta' => $hasta]);
-$totalMaquinasVendidas = (float)$stTotPT->fetchColumn();
-
-// ---------- RANKING TOP 5 CLIENTES POR VENTAS (PERÍODO ACTUAL) ----------
-$sqlTopClientes = "
-  SELECT 
-    c.id,
-    c.nombre,
-    COUNT(o.id) AS cant_pedidos,
-    COALESCE(SUM(o.total_neto),0) AS total_vendido
-  FROM orders o
-  JOIN customers c ON c.id = o.customer_id
-  WHERE 
-    DATE(o.fecha) BETWEEN :desde AND :hasta
-    AND o.estado <> 'BORRADOR'
-  GROUP BY c.id, c.nombre
-  ORDER BY total_vendido DESC
-  LIMIT 10
-";
-$stTC = db()->prepare($sqlTopClientes);
-$stTC->execute([':desde' => $desde, ':hasta' => $hasta]);
-$topClientes = $stTC->fetchAll(PDO::FETCH_ASSOC);
-
-// ---------- KPI: TICKET PROMEDIO ----------
-$ticketPromAct = $cantPedidosAct > 0 ? ($ingPedidosAct / $cantPedidosAct) : 0;
-$ticketPromPrev = $cantPedidosPrev > 0 ? ($ingPedidosPrev / $cantPedidosPrev) : 0;
-
-// ---------- KPI: ROTACIÓN “SIMPLE” DE STOCK PT ----------
-$sqlStockPT = "
-  SELECT COALESCE(SUM(stock_actual),0) AS stock_actual_pt
-  FROM products
-  WHERE tipo = 'PT'
-";
-$stockPTActual = (float)db()->query($sqlStockPT)->fetchColumn();
-$rotacionPT = $stockPTActual > 0 ? ($totalMaquinasVendidas / $stockPTActual) : null;
-
-// ---------- TOTAL HISTÓRICO (INGRESOS / GASTOS) ----------
-$totalHistPedidos = (float)db()->query("
-  SELECT COALESCE(SUM(total_neto),0) FROM orders WHERE estado <> 'BORRADOR'
-")->fetchColumn();
-
-$totalHistPagos = (float)db()->query("
-  SELECT COALESCE(SUM(importe),0) FROM payments
-")->fetchColumn();
-
-$totalHistGastos = (float)db()->query("
-  SELECT COALESCE(SUM(importe),0) FROM cash_expenses
-")->fetchColumn();
-
-// ---------- PREPARAR DATOS PARA GRÁFICOS (Chart.js) ----------
-$chartIngresosGastos = [
-  'labels' => ['Periodo actual', 'Periodo anterior'],
-  'ingresos_pagos' => [$ingPagosAct, $ingPagosPrev],
-  'gastos'          => [$gastosTotalAct, $gastosTotalPrev],
-];
-
-$chartTopPTLabels = [];
-$chartTopPTUnits  = [];
-foreach ($topMaquinas as $m) {
-  $chartTopPTLabels[] = $m['codigo'] . ' - ' . $m['nombre'];
-  $chartTopPTUnits[]  = (float)$m['unidades'];
+    return $data;
 }
 
-$printUrl = url('auditoria.php') . '?desde=' . urlencode($desde) . '&hasta=' . urlencode($hasta) . '&print=1';
+$current = get_audit_data($start_date, $end_date);
+$prev    = get_audit_data($prev_start, $prev_end);
 
+// Variaciones
+function calc_diff($curr, $prev) {
+    if ($prev == 0) return $curr > 0 ? 100 : 0;
+    return (($curr - $prev) / $prev) * 100;
+}
+
+$var_ventas  = calc_diff($current['ventas'], $prev['ventas']);
+$var_compras = calc_diff($current['compras'], $prev['compras']);
+$var_gastos  = calc_diff($current['gastos'], $prev['gastos']);
+
+// Gráfico Timeline (Día a día del periodo actual)
+// Gráfico Timeline
+$chart_ventas = [];
+$chart_egresos = [];
+$chart_labels = [];
+
+// Prepare labels for JS
+$begin = new DateTime($start_date);
+$end   = new DateTime($end_date);
+$end = $end->modify('+1 day'); // Include end date
+
+$interval = DateInterval::createFromDateString('1 day');
+$period = new DatePeriod($begin, $interval, $end);
+
+foreach ($period as $dt) {
+    $chart_labels[] = $dt->format("d/m");
+    $d = $dt->format("Y-m-d");
+    
+    // Ventas del día
+    $stmt = db()->prepare("SELECT SUM(total_neto) FROM orders WHERE DATE(fecha) = ? AND estado NOT IN ('BORRADOR','PRESUPUESTO','CANCELADO')");
+    $stmt->execute([$d]);
+    $chart_ventas[] = (float)$stmt->fetchColumn();
+    
+    // Egresos del día (Purchases + Expenses + Cash)
+    $e_day = 0;
+    $stmt = db()->prepare("SELECT SUM(total) FROM purchases WHERE DATE(fecha) = ?");
+    $stmt->execute([$d]);
+    $e_day += (float)$stmt->fetchColumn();
+    
+    $stmt = db()->prepare("SELECT SUM(importe) FROM expenses WHERE DATE(fecha) = ?");
+    $stmt->execute([$d]);
+    $e_day += (float)$stmt->fetchColumn();
+
+    $stmt = db()->prepare("SELECT SUM(importe) FROM cash_expenses WHERE DATE(fecha) = ?");
+    $stmt->execute([$d]);
+    $e_day += (float)$stmt->fetchColumn();
+    
+    $chart_egresos[] = $e_day;
+}
+
+// Categorías para chart
+$cat_labels = array_keys($current['gastos_categorias']);
+$cat_values = array_values($current['gastos_categorias']);
+
+// Include View
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 ?>
-<?php if ($isPrint): ?>
-<style>
-  @page { size: A4 landscape; margin: 10mm; }
-  .no-print, .navbar { display: none !important; }
-  .container { max-width: 100% !important; }
-  .card { box-shadow: none !important; }
-  body { font-size: 11px; }
-  h5, h6 { margin-bottom: 6px; }
-  .card-body { padding: 10px !important; }
-  .row { break-inside: avoid; page-break-inside: avoid; }
-  .card, .table-responsive, table, canvas { break-inside: avoid; page-break-inside: avoid; }
-  .table-responsive { overflow: visible !important; }
-  canvas { max-height: 200px !important; }
-</style>
-<?php endif; ?>
-<div class="container py-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="mb-0">Auditoría & Analytics</h5>
-  </div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <form class="row g-2 mb-3 no-print" method="get" action="<?= url('auditoria.php') ?>">
-    <div class="col-md-3">
-      <label class="form-label">Desde</label>
-      <input type="date" name="desde" class="form-control" value="<?= e($desde) ?>">
+<div class="container-fluid py-4">
+    <!-- Header y Filtros -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <h2 class="mb-0 fw-bold text-primary"><i class="bi bi-bar-chart-line-fill"></i> Auditoría y Reportes</h2>
+        
+        <form class="d-flex gap-2 bg-white p-2 rounded shadow-sm align-items-center" method="get">
+            <span class="text-muted small fw-bold">Período:</span>
+            <input type="date" name="start_date" class="form-control form-control-sm" value="<?= $start_date ?>">
+            <span class="text-muted">–</span>
+            <input type="date" name="end_date" class="form-control form-control-sm" value="<?= $end_date ?>">
+            <button class="btn btn-primary btn-sm px-3">Actualizar</button>
+            <a href="auditoria.php" class="btn btn-outline-secondary btn-sm" title="Mes actual"><i class="bi bi-arrow-clockwise"></i></a>
+        </form>
     </div>
-    <div class="col-md-3">
-      <label class="form-label">Hasta</label>
-      <input type="date" name="hasta" class="form-control" value="<?= e($hasta) ?>">
-    </div>
-    <div class="col-md-3 d-grid">
-      <label class="form-label">&nbsp;</label>
-      <button class="btn btn-outline-secondary">Aplicar</button>
-    </div>
-    <div class="col-md-3 d-grid">
-      <label class="form-label">&nbsp;</label>
-      <a class="btn btn-outline-secondary" href="<?= url('auditoria.php') ?>">Reset</a>
-    </div>
-    <div class="col-md-3 d-grid">
-      <label class="form-label">&nbsp;</label>
-      <a class="btn btn-outline-primary" target="_blank" href="<?= e($printUrl) ?>">Imprimir A4 Horizontal</a>
-    </div>
-  </form>
 
-  <div class="row g-3 mb-3">
-    <!-- Ingresos por pedidos -->
-    <div class="col-md-3">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Ingresos por pedidos (período)</div>
-          <div class="fs-5 fw-semibold mb-1"><?= money($ingPedidosAct) ?></div>
-          <div class="small text-muted">
-            <?= (int)$cantPedidosAct ?> pedidos<br>
-            vs período anterior: <?= money($ingPedidosPrev) ?>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Ingresos por pagos -->
-    <div class="col-md-3">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Ingresos por pagos (caja)</div>
-          <div class="fs-5 fw-semibold mb-1"><?= money($ingPagosAct) ?></div>
-          <div class="small text-muted">
-            vs período anterior: <?= money($ingPagosPrev) ?>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Gastos -->
-    <div class="col-md-3">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Gastos (período)</div>
-          <div class="fs-5 fw-semibold mb-1"><?= money($gastosTotalAct) ?></div>
-          <div class="small text-muted">
-            vs período anterior: <?= money($gastosTotalPrev) ?>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- Ticket promedio -->
-    <div class="col-md-3">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Ticket promedio (por pedido)</div>
-          <div class="fs-5 fw-semibold mb-1"><?= money($ticketPromAct) ?></div>
-          <div class="small text-muted">
-            vs período anterior: <?= money($ticketPromPrev) ?>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- KPIs extra -->
-  <div class="row g-3 mb-3">
-    <div class="col-md-4">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Máquinas (PT) vendidas en el período</div>
-          <div class="fs-5 fw-semibold mb-1"><?= number_format($totalMaquinasVendidas, 2, ',', '.') ?></div>
-          <div class="small text-muted">Incluye todos los productos tipo PT en pedidos no BORRADOR.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Stock actual de Maquinas Terminadas</div>
-          <div class="fs-5 fw-semibold mb-1"><?= number_format($stockPTActual, 2, ',', '.') ?></div>
-          <div class="small text-muted">Suma de stock_actual de productos tipo PT.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <div class="small text-muted">Rotación simple de PT (período)</div>
-          <div class="fs-5 fw-semibold mb-1">
-            <?php if ($rotacionPT === null): ?>
-              N/A
-            <?php else: ?>
-              <?= number_format($rotacionPT, 2, ',', '.') ?> veces
-            <?php endif; ?>
-          </div>
-          <div class="small text-muted">
-            Aproximación: unidades PT vendidas en el período / stock actual PT.
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Total histórico -->
-  <div class="row g-3 mb-4">
-    <div class="col-md-4">
-      <div class="card border-0 bg-light h-100">
-        <div class="card-body">
-          <div class="small text-muted">Total histórico de pedidos (no BORRADOR)</div>
-          <div class="fs-5 fw-semibold"><?= money($totalHistPedidos) ?></div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card border-0 bg-light h-100">
-        <div class="card-body">
-          <div class="small text-muted">Total histórico de pagos</div>
-          <div class="fs-5 fw-semibold"><?= money($totalHistPagos) ?></div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-4">
-      <div class="card border-0 bg-light h-100">
-        <div class="card-body">
-          <div class="small text-muted">Total histórico de gastos</div>
-          <div class="fs-5 fw-semibold"><?= money($totalHistGastos) ?></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Gráficos -->
-  <div class="row g-3 mb-4">
-    <div class="col-md-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <h6 class="card-title">Ingresos vs Gastos (comparativa períodos)</h6>
-          <canvas id="chartIngresosGastos" style="max-height:260px;"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <h6 class="card-title">Gastos por categoría (período actual)</h6>
-          <?php if (!$gastosCatAct): ?>
-            <p class="text-muted small mb-0">No hay gastos registrados en el período.</p>
-          <?php else: ?>
-            <div class="table-responsive">
-              <table class="table table-sm mb-0">
-                <thead class="table-light">
-                  <tr>
-                    <th>Categoría</th>
-                    <th class="text-end">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($gastosCatAct as $g): ?>
-                  <tr>
-                    <td><?= e($g['categoria']) ?></td>
-                    <td class="text-end"><?= money($g['total']) ?></td>
-                  </tr>
-                <?php endforeach; ?>
-                </tbody>
-              </table>
+    <!-- KPIs Principales -->
+    <div class="row g-3 mb-4">
+        <!-- Ventas -->
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-4 border-success">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase fw-bold mb-1">Ingresos (Ventas)</div>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
+                    <div class="small mt-2 <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
+                        <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>% vs periodo anterior
+                    </div>
+                </div>
             </div>
-          <?php endif; ?>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Top máquinas y ranking de clientes -->
-  <div class="row g-3 mb-4">
-    <div class="col-md-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <h6 class="card-title">Top 5 máquinas (PT) vendidas</h6>
-          <?php if (!$topMaquinas): ?>
-            <p class="text-muted small mb-0">No hay ventas de PT en el período.</p>
-          <?php else: ?>
-            <canvas id="chartTopMaquinas" style="max-height:260px;"></canvas>
-            <div class="table-responsive mt-3">
-              <table class="table table-sm mb-0">
-                <thead class="table-light">
-                  <tr>
-                    <th>Producto</th>
-                    <th class="text-end">Unidades</th>
-                    <th class="text-end">Total ventas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($topMaquinas as $m): ?>
-                  <tr>
-                    <td><?= e($m['codigo'] . ' - ' . $m['nombre']) ?></td>
-                    <td class="text-end"><?= number_format($m['unidades'], 2, ',', '.') ?></td>
-                    <td class="text-end"><?= money($m['total_ventas']) ?></td>
-                  </tr>
-                <?php endforeach; ?>
-                </tbody>
-              </table>
+        <!-- Compras MP -->
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-4 border-warning">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase fw-bold mb-1">Compras (Materia Prima)</div>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($current['compras']) ?></h3>
+                    <div class="small mt-2 <?= $var_compras <= 0 ? 'text-success' : 'text-danger' ?>">
+                        <i class="bi bi-arrow-<?= $var_compras > 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_compras), 1) ?>% vs periodo anterior
+                    </div>
+                </div>
             </div>
-          <?php endif; ?>
         </div>
-      </div>
-    </div>
 
-    <div class="col-md-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-body">
-          <h6 class="card-title">Top 5 clientes por ventas (período)</h6>
-          <?php if (!$topClientes): ?>
-            <p class="text-muted small mb-0">No hay pedidos en el período.</p>
-          <?php else: ?>
-            <div class="table-responsive">
-              <table class="table table-sm mb-0">
-                <thead class="table-light">
-                  <tr>
-                    <th>Cliente</th>
-                    <th class="text-end">Pedidos</th>
-                    <th class="text-end">Total vendido</th>
-                  </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($topClientes as $c): ?>
-                  <tr>
-                    <td><?= e($c['nombre']) ?></td>
-                    <td class="text-end"><?= (int)$c['cant_pedidos'] ?></td>
-                    <td class="text-end"><?= money($c['total_vendido']) ?></td>
-                  </tr>
-                <?php endforeach; ?>
-                </tbody>
-              </table>
+        <!-- Gastos Operativos -->
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-4 border-danger">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase fw-bold mb-1">Gastos Operativos</div>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($current['gastos']) ?></h3>
+                    <div class="small mt-2 <?= $var_gastos <= 0 ? 'text-success' : 'text-danger' ?>">
+                        <i class="bi bi-arrow-<?= $var_gastos > 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_gastos), 1) ?>% vs periodo anterior
+                    </div>
+                </div>
             </div>
-          <?php endif; ?>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <p class="small text-muted">
-    Tip: este panel está pensado para jugar con rangos de fechas y ver rápidamente 
-    cómo se comportan ventas, cobros y gastos. Ideal para decisiones de precios, stock y marketing.
-  </p>
+        <!-- Resultado Neto -->
+        <?php 
+            $neto = $current['ventas'] - ($current['compras'] + $current['gastos']);
+            $margen = $current['ventas'] > 0 ? ($neto / $current['ventas']) * 100 : 0;
+        ?>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100 bg-primary text-white">
+                <div class="card-body">
+                    <div class="text-white-50 small text-uppercase fw-bold mb-1">Resultado Neto</div>
+                    <h3 class="fw-bold mb-0"><?= money($neto) ?></h3>
+                    <div class="small mt-2 text-white-50">
+                        Margen: <strong><?= number_format($margen, 1) ?>%</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gráficos -->
+    <div class="row g-3 mb-4">
+        <!-- Timeline -->
+        <div class="col-12">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold">Evolución Diaria (Ingresos vs Egresos)</h6>
+                </div>
+                <div class="card-body">
+                    <div style="height: 300px; position: relative;">
+                        <canvas id="chartTimeline"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Listado Detalles -->
+    <div class="row g-3 mb-4">
+        <!-- Top Productos -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold">Top 5 Productos Vendidos</h6>
+                </div>
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Producto</th>
+                                <th class="text-center">Cant.</th>
+                                <th class="text-end">Total Generado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($current['top_productos'])): ?>
+                                <tr><td colspan="3" class="text-center text-muted py-3">Sin ventas en este periodo</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($current['top_productos'] as $p): ?>
+                                <tr>
+                                    <td><?= e($p['nombre']) ?></td>
+                                    <td class="text-center badge bg-light text-dark mx-auto d-block mt-2" style="width:fit-content"><?= (float)$p['cantidad'] ?></td>
+                                    <td class="text-end fw-bold text-success"><?= money($p['total_vendido']) ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resumen General Data Table -->
+         <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold">Resumen Financiero</h6>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Ingresos Totales (Ventas Netas)
+                            <span class="fw-bold"><?= money($current['ventas']) ?></span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center text-danger">
+                            (-) Compras (Insumos/Stock)
+                            <span class="fw-bold"><?= money($current['compras']) ?></span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center text-danger">
+                            (-) Gastos Operativos
+                            <span class="fw-bold"><?= money($current['gastos']) ?></span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center bg-light fw-bold mt-2">
+                            = Resultado Operativo
+                            <span class="<?= $neto >= 0 ? 'text-success' : 'text-danger' ?>"><?= money($neto) ?></span>
+                        </li>
+                    </ul>
+                    <div class="alert alert-info mt-3 mb-0 small">
+                        <i class="bi bi-info-circle"></i> Los datos mostrados no incluyen movimientos pendientes de facturación o pagos no registrados. Se basan en fechas de emisión de orden/gasto.
+                    </div>
+                </div>
+            </div>
+         </div>
+    </div>
+
+        <!-- Detalle de Gastos por Categoría -->
+        <div class="row g-3 mt-4">
+            <div class="col-12">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white py-3">
+                         <h6 class="mb-0 fw-bold">Detalle de Gastos por Categoría</h6>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Categoría</th>
+                                    <th class="text-end" style="width: 200px;">Monto Total</th>
+                                    <th class="text-end" style="width: 150px;">% del Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php 
+                                $total_gastos = $current['gastos'];
+                                arsort($current['gastos_categorias']);
+                                if ($total_gastos > 0):
+                                    foreach ($current['gastos_categorias'] as $cat => $val): 
+                                        $porcentaje = ($val / $total_gastos) * 100;
+                                ?>
+                                <tr>
+                                    <td><?= e($cat) ?></td>
+                                    <td class="text-end fw-bold"><?= money($val) ?></td>
+                                    <td class="text-end text-muted"><?= number_format($porcentaje, 1) ?>%</td>
+                                </tr>
+                                <?php endforeach; 
+                                else: ?>
+                                <tr><td colspan="3" class="text-center text-muted py-3">No hay gastos registrados en este período.</td></tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
 </div>
 
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Print Styles -->
+<style>
+@media print {
+    /* Hide non-essential elements */
+    nav, .btn, form, footer, .bi-arrow-clockwise {
+        display: none !important;
+    }
+    /* Expand container */
+    .container-fluid {
+        width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    /* Card borders for print clarity */
+    .card {
+        border: 1px solid #ddd !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+    }
+    /* Colors */
+    .bg-primary { background-color: #0d6efd !important; color: white !important; -webkit-print-color-adjust: exact; }
+    .text-success { color: #198754 !important; -webkit-print-color-adjust: exact; }
+    .text-danger { color: #dc3545 !important; -webkit-print-color-adjust: exact; }
+    
+    /* Ensure charts print */
+    canvas {
+        max-width: 100% !important;
+        max-height: 100% !important;
+    }
+    
+    /* Font sizes */
+    body { font-size: 10pt; }
+    h2, h3 { color: #000 !important; }
+}
+</style>
+
+<!-- Scripts ChartJS -->
 <script>
-<?php if ($isPrint): ?>
-Chart.defaults.animation = false;
-Chart.defaults.responsiveAnimationDuration = 0;
-<?php endif; ?>
-const chartIngresosGastosData = <?= json_encode($chartIngresosGastos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-const topPTLabels     = <?= json_encode($chartTopPTLabels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-const topPTUnits      = <?= json_encode($chartTopPTUnits, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+    // Config global currency format ish
+    const moneyFormat = (value) => {
+        return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
+    };
 
-function makeChartIngresosGastos() {
-  const ctx = document.getElementById('chartIngresosGastos');
-  if (!ctx) return;
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: chartIngresosGastosData.labels,
-      datasets: [
-        {
-          label: 'Ingresos (pagos)',
-          data: chartIngresosGastosData.ingresos_pagos,
+    // Timeline Chart
+    const ctxTimeline = document.getElementById('chartTimeline').getContext('2d');
+    new Chart(ctxTimeline, {
+        type: 'line',
+        data: {
+            labels: <?= json_encode($chart_labels) ?>,
+            datasets: [
+                {
+                    label: 'Ingresos',
+                    data: <?= json_encode($chart_ventas) ?>,
+                    borderColor: '#198754',
+                    backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                },
+                {
+                    label: 'Egresos',
+                    data: <?= json_encode($chart_egresos) ?>,
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }
+            ]
         },
-        {
-          label: 'Gastos',
-          data: chartIngresosGastosData.gastos,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ' + moneyFormat(context.raw);
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: { beginAtZero: true }
+            }
         }
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'bottom' }
-      },
-      scales: {
-        y: { beginAtZero: true }
-      }
-    }
-  });
-}
+    });
 
-function makeChartTopMaquinas() {
-  const ctx = document.getElementById('chartTopMaquinas');
-  if (!ctx || !topPTLabels.length) return;
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: topPTLabels,
-      datasets: [{
-        label: 'Unidades vendidas',
-        data: topPTUnits,
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        x: { beginAtZero: true }
-      }
-    }
-  });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  makeChartIngresosGastos();
-  makeChartTopMaquinas();
-});
+    // Doughnut Chart removed as per request
 </script>
 
 <?php include __DIR__ . '/../views/partials/footer.php'; ?>
-<?php if ($isPrint): ?>
-<script>
-  window.addEventListener('load', function () {
-    setTimeout(function () {
-      window.print();
-    }, 500);
-  });
-</script>
-<?php endif; ?>
