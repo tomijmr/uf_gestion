@@ -103,12 +103,50 @@ $var_compras = calc_diff($current['compras'], $prev['compras']);
 $var_gastos  = calc_diff($current['gastos'], $prev['gastos']);
 
 // Gráfico Timeline (Día a día del periodo actual)
-// Gráfico Timeline
 $chart_ventas = [];
 $chart_egresos = [];
 $chart_labels = [];
 
-// Prepare labels for JS
+// -- OPTIMIZACIÓN: Fetch grouped data first (4 queries total instead of 4 * days) --
+
+// 1. Grouped Ventas
+$sql_daily_ventas = "SELECT DATE(fecha) as dia, SUM(total_neto) as total 
+                     FROM orders 
+                     WHERE fecha BETWEEN ? AND ? 
+                     AND estado NOT IN ('BORRADOR','PRESUPUESTO','CANCELADO')
+                     GROUP BY DATE(fecha)";
+$stmt = db()->prepare($sql_daily_ventas);
+$stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+$daily_ventas = $stmt->fetchAll(PDO::FETCH_KEY_PAIR); // [ '2023-01-01' => 1500, ... ]
+
+// 2. Grouped Compras
+$sql_daily_purchases = "SELECT DATE(fecha) as dia, SUM(total) as total 
+                        FROM purchases 
+                        WHERE fecha BETWEEN ? AND ? 
+                        GROUP BY DATE(fecha)";
+$stmt = db()->prepare($sql_daily_purchases);
+$stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+$daily_purchases = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+// 3. Grouped Expenses
+$sql_daily_expenses = "SELECT DATE(fecha) as dia, SUM(importe) as total 
+                       FROM expenses 
+                       WHERE fecha BETWEEN ? AND ? 
+                       GROUP BY DATE(fecha)";
+$stmt = db()->prepare($sql_daily_expenses);
+$stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+$daily_expenses = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+// 4. Grouped Cash Expenses
+$sql_daily_cash = "SELECT DATE(fecha) as dia, SUM(importe) as total 
+                   FROM cash_expenses 
+                   WHERE fecha BETWEEN ? AND ? 
+                   GROUP BY DATE(fecha)";
+$stmt = db()->prepare($sql_daily_cash);
+$stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+$daily_cash = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+// Prepare timeline loop purely in PHP
 $begin = new DateTime($start_date);
 $end   = new DateTime($end_date);
 $end = $end->modify('+1 day'); // Include end date
@@ -120,26 +158,16 @@ foreach ($period as $dt) {
     $chart_labels[] = $dt->format("d/m");
     $d = $dt->format("Y-m-d");
     
-    // Ventas del día
-    $stmt = db()->prepare("SELECT SUM(total_neto) FROM orders WHERE DATE(fecha) = ? AND estado NOT IN ('BORRADOR','PRESUPUESTO','CANCELADO')");
-    $stmt->execute([$d]);
-    $chart_ventas[] = (float)$stmt->fetchColumn();
+    // Ventas
+    $val_ventas = isset($daily_ventas[$d]) ? (float)$daily_ventas[$d] : 0;
+    $chart_ventas[] = $val_ventas;
     
-    // Egresos del día (Purchases + Expenses + Cash)
-    $e_day = 0;
-    $stmt = db()->prepare("SELECT SUM(total) FROM purchases WHERE DATE(fecha) = ?");
-    $stmt->execute([$d]);
-    $e_day += (float)$stmt->fetchColumn();
+    // Egresos (Sum of all 3 sources)
+    $val_purchases = isset($daily_purchases[$d]) ? (float)$daily_purchases[$d] : 0;
+    $val_expenses  = isset($daily_expenses[$d]) ? (float)$daily_expenses[$d] : 0;
+    $val_cash      = isset($daily_cash[$d]) ? (float)$daily_cash[$d] : 0;
     
-    $stmt = db()->prepare("SELECT SUM(importe) FROM expenses WHERE DATE(fecha) = ?");
-    $stmt->execute([$d]);
-    $e_day += (float)$stmt->fetchColumn();
-
-    $stmt = db()->prepare("SELECT SUM(importe) FROM cash_expenses WHERE DATE(fecha) = ?");
-    $stmt->execute([$d]);
-    $e_day += (float)$stmt->fetchColumn();
-    
-    $chart_egresos[] = $e_day;
+    $chart_egresos[] = $val_purchases + $val_expenses + $val_cash;
 }
 
 // Categorías para chart
