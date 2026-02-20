@@ -485,6 +485,137 @@ include __DIR__ . '/../views/partials/navbar.php';
             </div>
         </div>
 
+        <!-- Detalle de Transacciones (Ingresos y Egresos) -->
+        <div class="col-12 mt-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                     <h6 class="mb-0 fw-bold">Reporte Detallado de Movimientos</h6>
+                     <span class="badge bg-light text-muted border">Caja y Bancos</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 text-nowrap">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Tipo</th>
+                                <th>Categoría / Cliente / Prov.</th>
+                                <th>Detalle / Medio</th>
+                                <th class="text-end">Ingreso</th>
+                                <th class="text-end">Egreso</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php 
+                            // Fetch all movements for the detailed report
+                            $movements = [];
+
+                            // 1. Ingresos (Payments)
+                            $sqlPay = "SELECT p.fecha, 'INGRESO' as tipo, c.nombre as tercero, p.medio, p.referencia, p.importe 
+                                       FROM payments p 
+                                       LEFT JOIN customers c ON c.id = p.customer_id 
+                                       WHERE p.fecha BETWEEN ? AND ?";
+                            $stmt = $db->prepare($sqlPay);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+                            while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                                $movements[] = [
+                                    'fecha' => $row['fecha'],
+                                    'tipo'  => 'INGRESO',
+                                    'cat'   => $row['tercero'] ?: 'Cliente Final',
+                                    'det'   => $row['medio'] . ($row['referencia'] ? " (Ref: {$row['referencia']})" : ''),
+                                    'in'    => (float)$row['importe'],
+                                    'out'   => 0
+                                ];
+                            }
+
+                            // 2. Compras (Purchases)
+                            $sqlPur = "SELECT fecha, 'EGRESO' as tipo, proveedor as tercero, comp_tipo, comp_numero, total 
+                                       FROM purchases 
+                                       WHERE fecha BETWEEN ? AND ?";
+                            $stmt = $db->prepare($sqlPur);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+                            while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                                $movements[] = [
+                                    'fecha' => $row['fecha'],
+                                    'tipo'  => 'COMPRA',
+                                    'cat'   => $row['tercero'] ?: 'Proveedor',
+                                    'det'   => "{$row['comp_tipo']} {$row['comp_numero']}",
+                                    'in'    => 0,
+                                    'out'   => (float)$row['total']
+                                ];
+                            }
+
+                            // 3. Gastos (Expenses - Cash & General)
+                            // General
+                            $sqlExp = "SELECT fecha, 'GASTO' as tipo, categoria, descripcion, importe FROM expenses WHERE fecha BETWEEN ? AND ?";
+                            $stmt = $db->prepare($sqlExp);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+                            while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                                $movements[] = [
+                                    'fecha' => $row['fecha'],
+                                    'tipo'  => 'GASTO',
+                                    'cat'   => $row['categoria'],
+                                    'det'   => $row['descripcion'],
+                                    'in'    => 0,
+                                    'out'   => (float)$row['importe']
+                                ];
+                            }
+                            // Cash
+                            $sqlCash = "SELECT fecha, 'GASTO CAJA' as tipo, categoria, descripcion, importe FROM cash_expenses WHERE fecha BETWEEN ? AND ?";
+                            $stmt = $db->prepare($sqlCash);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
+                            while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                                $movements[] = [
+                                    'fecha' => $row['fecha'],
+                                    'tipo'  => 'GASTO (Caja)',
+                                    'cat'   => $row['categoria'],
+                                    'det'   => $row['descripcion'],
+                                    'in'    => 0,
+                                    'out'   => (float)$row['importe']
+                                ];
+                            }
+
+                            // Sort by date DESC
+                            usort($movements, function($a, $b) {
+                                return strtotime($b['fecha']) - strtotime($a['fecha']);
+                            });
+
+                            $total_in = 0;
+                            $total_out = 0;
+
+                            if (count($movements) > 0):
+                                foreach ($movements as $m): 
+                                    $total_in += $m['in'];
+                                    $total_out += $m['out'];
+                            ?>
+                            <tr>
+                                <td class="text-muted small"><?= date('d/m/Y H:i', strtotime($m['fecha'])) ?></td>
+                                <td>
+                                    <?php if ($m['in'] > 0): ?>
+                                        <span class="badge bg-success bg-opacity-10 text-success border border-success">Ingreso</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger"><?= $m['tipo'] ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?= e(substr($m['cat'], 0, 40)) ?></td>
+                                <td class="small text-muted"><?= e(substr($m['det'], 0, 50)) ?></td>
+                                <td class="text-end fw-bold text-success"><?= $m['in'] > 0 ? money($m['in']) : '-' ?></td>
+                                <td class="text-end fw-bold text-danger"><?= $m['out'] > 0 ? money($m['out']) : '-' ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <tr class="table-secondary fw-bold">
+                                <td colspan="4" class="text-end">TOTALES DEL PERÍODO</td>
+                                <td class="text-end text-success"><?= money($total_in) ?></td>
+                                <td class="text-end text-danger"><?= money($total_out) ?></td>
+                            </tr>
+                            <?php else: ?>
+                            <tr><td colspan="6" class="text-center text-muted py-3">No hay movimientos en este período.</td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
     </div>
 
 </div>
