@@ -508,15 +508,15 @@ include __DIR__ . '/../views/partials/navbar.php';
                             <?php 
                             // Fetch all movements for the detailed report
                             $movements = [];
-                            $db = db(); // Ensure $db is defined
+                            $db = db();
 
-                            // 1. Ingresos (Payments) - Usando DATE(fecha) igual que caja.php para consistencia
+                            // 1. Ingresos (Payments) - Usando rango fecha completo para asegurar index usage
                             $sqlPay = "SELECT p.fecha, 'INGRESO' as tipo, c.nombre as tercero, p.medio, p.referencia, p.importe 
                                        FROM payments p 
                                        LEFT JOIN customers c ON c.id = p.customer_id 
-                                       WHERE DATE(p.fecha) BETWEEN ? AND ?";
+                                       WHERE p.fecha >= ? AND p.fecha <= ?";
                             $stmt = $db->prepare($sqlPay);
-                            $stmt->execute([$start_date, $end_date]);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
                             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                                 $movements[] = [
                                     'fecha' => $row['fecha'],
@@ -531,9 +531,9 @@ include __DIR__ . '/../views/partials/navbar.php';
                             // 2. Compras (Purchases)
                             $sqlPur = "SELECT fecha, 'EGRESO' as tipo, proveedor as tercero, comp_tipo, comp_numero, total 
                                        FROM purchases 
-                                       WHERE DATE(fecha) BETWEEN ? AND ?";
+                                       WHERE fecha >= ? AND fecha <= ?";
                             $stmt = $db->prepare($sqlPur);
-                            $stmt->execute([$start_date, $end_date]);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
                             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                                 $movements[] = [
                                     'fecha' => $row['fecha'],
@@ -547,9 +547,9 @@ include __DIR__ . '/../views/partials/navbar.php';
 
                             // 3. Gastos (Expenses - Cash & General)
                             // General
-                            $sqlExp = "SELECT fecha, 'GASTO' as tipo, categoria, descripcion, importe FROM expenses WHERE DATE(fecha) BETWEEN ? AND ?";
+                            $sqlExp = "SELECT fecha, 'GASTO' as tipo, categoria, descripcion, importe FROM expenses WHERE fecha >= ? AND fecha <= ?";
                             $stmt = $db->prepare($sqlExp);
-                            $stmt->execute([$start_date, $end_date]);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
                             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                                 $movements[] = [
                                     'fecha' => $row['fecha'],
@@ -561,9 +561,9 @@ include __DIR__ . '/../views/partials/navbar.php';
                                 ];
                             }
                             // Cash
-                            $sqlCash = "SELECT fecha, 'GASTO CAJA' as tipo, categoria, descripcion, importe FROM cash_expenses WHERE DATE(fecha) BETWEEN ? AND ?";
+                            $sqlCash = "SELECT fecha, 'GASTO CAJA' as tipo, categoria, descripcion, importe FROM cash_expenses WHERE fecha >= ? AND fecha <= ?";
                             $stmt = $db->prepare($sqlCash);
-                            $stmt->execute([$start_date, $end_date]);
+                            $stmt->execute([$start_date . ' 00:00:00', $end_date . ' 23:59:59']);
                             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                                 $movements[] = [
                                     'fecha' => $row['fecha'],
