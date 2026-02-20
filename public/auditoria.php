@@ -211,19 +211,27 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     <!-- KPIs Principales -->
     <div class="row g-3 mb-4">
-        <!-- Ventas -->
+        <!-- Ventas (Pedidos) -->
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-4 border-primary">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase fw-bold mb-1">Ventas (Facturado)</div>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
+                    <div class="small mt-2 <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
+                        <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>% vs periodo anterior
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ingresos Reales (Caja) -->
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-success">
                 <div class="card-body">
-                    <div class="text-muted small text-uppercase fw-bold mb-1">Ingresos (Ventas)</div>
-                    <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
-                    <div class="d-flex align-items-center justify-content-between mt-2">
-                        <div class="small <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
-                             <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>%
-                        </div>
-                        <div class="small text-muted text-end" style="line-height:1.2">
-                            <div>En Caja: <span class="fw-bold text-dark"><?= money($current['cobros']) ?></span></div>
-                        </div>
+                    <div class="text-muted small text-uppercase fw-bold mb-1">Ingresos Reales (Caja)</div>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($current['cobros']) ?></h3>
+                    <div class="small mt-2 text-muted">
+                        Pagos recibidos en el período
                     </div>
                 </div>
             </div>
@@ -254,20 +262,53 @@ include __DIR__ . '/../views/partials/navbar.php';
                 </div>
             </div>
         </div>
+    </div>
 
+    <div class="row g-3 mb-4">
         <!-- Resultado Neto -->
         <?php 
+            // Neto operativo = Ventas - (Compras + Gastos)
             $neto = $current['ventas'] - ($current['compras'] + $current['gastos']);
+            // Neto financiero (Cash Flow) = Cobros - (Compras + Gastos)
+            $cash_flow = $current['cobros'] - ($current['compras'] + $current['gastos']);
+            
             $margen = $current['ventas'] > 0 ? ($neto / $current['ventas']) * 100 : 0;
         ?>
-        <div class="col-md-3">
+        <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100 bg-primary text-white">
-                <div class="card-body">
-                    <div class="text-white-50 small text-uppercase fw-bold mb-1">Resultado Neto</div>
-                    <h3 class="fw-bold mb-0"><?= money($neto) ?></h3>
-                    <div class="small mt-2 text-white-50">
-                        Margen: <strong><?= number_format($margen, 1) ?>%</strong>
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-white-50 small text-uppercase fw-bold mb-1">Resultado Operativo (Ventas - Gastos)</div>
+                        <h3 class="fw-bold mb-0"><?= money($neto) ?></h3>
+                        <div class="small mt-1 text-white-50">Margen: <strong><?= number_format($margen, 1) ?>%</strong></div>
                     </div>
+                    <div class="text-end border-start ps-4 border-light">
+                         <div class="text-white-50 small text-uppercase fw-bold mb-1">Flujo de Caja Real</div>
+                         <h3 class="fw-bold mb-0" style="color: #6affad;"><?= money($cash_flow) ?></h3>
+                         <div class="small mt-1 text-white-50">Cobros - Pagos</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Balance General (Actualizado para usar Cobros en lugar de Ventas si se desea ver flujo de caja, pero mantenemos ventas para balance economico) -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex flex-column justify-content-center pt-2 pb-2">
+                     <div class="row text-center align-items-center h-100">
+                        <div class="col-4 border-end">
+                            <small class="text-muted d-block mb-1">Total Entradas (Caja)</small>
+                            <span class="fw-bold text-success fs-5"><?= money($current['cobros']) ?></span>
+                        </div>
+                         <div class="col-4 border-end">
+                            <small class="text-muted d-block mb-1">Total Salidas</small>
+                            <span class="fw-bold text-danger fs-5"><?= money($current['compras'] + $current['gastos']) ?></span>
+                        </div>
+                        <div class="col-4">
+                            <small class="text-muted d-block mb-1">Resultado Financiero</small>
+                             <span class="fw-bold fs-5 <?= $cash_flow >= 0 ? 'text-primary' : 'text-danger' ?>"><?= money($cash_flow) ?></span>
+                        </div>
+                     </div>
                 </div>
             </div>
         </div>
