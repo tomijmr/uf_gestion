@@ -25,6 +25,7 @@ function get_audit_data($start, $end) {
     $db = db();
     $data = [
         'ventas' => 0,
+        'cobros' => 0, // Cobros reales en caja
         'compras' => 0, // Materia prima
         'gastos' => 0,  // Gastos generales + caja chica
         'gastos_categorias' => [],
@@ -40,6 +41,13 @@ function get_audit_data($start, $end) {
     $stmt = $db->prepare($sqlVentas);
     $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
     $data['ventas'] = (float)($stmt->fetchColumn() ?? 0);
+
+    // 1b. COBROS REALES (Payments) - Para conciliación de caja
+    $sqlCobros = "SELECT SUM(importe) as total FROM payments 
+                  WHERE fecha BETWEEN ? AND ?";
+    $stmt = $db->prepare($sqlCobros);
+    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $data['cobros'] = (float)($stmt->fetchColumn() ?? 0);
 
     // 2. COMPRAS (Purchases - Materia Prima)
     $sqlCompras = "SELECT SUM(total) as total FROM purchases 
@@ -209,8 +217,13 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <div class="card-body">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Ingresos (Ventas)</div>
                     <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
-                    <div class="small mt-2 <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
-                        <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>% vs periodo anterior
+                    <div class="d-flex align-items-center justify-content-between mt-2">
+                        <div class="small <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
+                             <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>%
+                        </div>
+                        <div class="small text-muted text-end" style="line-height:1.2">
+                            <div>En Caja: <span class="fw-bold text-dark"><?= money($current['cobros']) ?></span></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -265,8 +278,9 @@ include __DIR__ . '/../views/partials/navbar.php';
         <!-- Comparativa General -->
         <div class="col-md-4">
             <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white py-3">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0 fw-bold">Balance General</h6>
+                    <span class="badge bg-light text-muted border">Devengado</span>
                 </div>
                 <div class="card-body d-flex flex-column justify-content-center">
                     <?php 
