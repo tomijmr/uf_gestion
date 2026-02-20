@@ -262,8 +262,53 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     <!-- Gráficos -->
     <div class="row g-3 mb-4">
+        <!-- Comparativa General -->
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold">Balance General</h6>
+                </div>
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <?php 
+                        $total_egresos = $current['compras'] + $current['gastos'];
+                        $total_balance = $current['ventas'] + $total_egresos;
+                        $p_ingresos = $total_balance > 0 ? ($current['ventas'] / $total_balance) * 100 : 0;
+                        $p_egresos = $total_balance > 0 ? ($total_egresos / $total_balance) * 100 : 0;
+                    ?>
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="fw-bold text-success">Ingresos</span>
+                            <span class="fw-bold"><?= number_format($p_ingresos, 1) ?>%</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar bg-success" style="width: <?= $p_ingresos ?>%"><?= money($current['ventas']) ?></div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="fw-bold text-danger">Egresos</span>
+                            <span class="fw-bold"><?= number_format($p_egresos, 1) ?>%</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar bg-danger" style="width: <?= $p_egresos ?>%"><?= money($total_egresos) ?></div>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <div class="text-center">
+                        <small class="text-muted">Ratio de Eficiencia</small>
+                        <h4 class="mb-0 fw-bold <?= $current['ventas'] > $total_egresos ? 'text-primary' : 'text-warning' ?>">
+                            <?= $total_egresos > 0 ? number_format($current['ventas'] / $total_egresos, 2) : 'N/A' ?>x
+                        </h4>
+                        <small class="text-muted">Por cada $1 de egreso, ingresan $<?= $total_egresos > 0 ? number_format($current['ventas'] / $total_egresos, 2) : '0' ?></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Timeline -->
-        <div class="col-12">
+        <div class="col-md-8">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white py-3">
                     <h6 class="mb-0 fw-bold">Evolución Diaria (Ingresos vs Egresos)</h6>
