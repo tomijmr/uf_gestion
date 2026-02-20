@@ -508,6 +508,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                             <?php 
                             // Fetch all movements for the detailed report
                             $movements = [];
+                            $db = db(); // Ensure $db is defined
 
                             // 1. Ingresos (Payments) - Usando DATE(fecha) igual que caja.php para consistencia
                             $sqlPay = "SELECT p.fecha, 'INGRESO' as tipo, c.nombre as tercero, p.medio, p.referencia, p.importe 
