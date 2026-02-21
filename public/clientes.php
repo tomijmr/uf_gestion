@@ -34,22 +34,27 @@ $total = (int)$stmt->fetch()['total'];
 $pages = max(1, (int)ceil($total / $limit));
 
 // Consulta de datos
+// Obtener el último saldo del ledger para cada cliente y sumarle el saldo_deuda inicial
 $sql = "SELECT 
           c.id, 
           c.nombre, 
           c.gym, 
           c.cuit_dni, 
           c.telefono,
-          COALESCE(SUM(cl.monto), 0) - COALESCE(SUM(p.importe), 0) AS saldo
+          c.saldo_deuda,
+          (
+            COALESCE((
+              SELECT cl.saldo_resultante 
+              FROM customer_ledger cl 
+              WHERE cl.customer_id = c.id 
+              ORDER BY cl.fecha DESC, cl.id DESC 
+              LIMIT 1
+            ), 0) + c.saldo_deuda
+          ) AS saldo
         FROM customers c
-        LEFT JOIN customer_ledger cl ON cl.customer_id = c.id
-        LEFT JOIN payments p ON p.customer_id = c.id
         $where
-        GROUP BY c.id, c.nombre, c.gym, c.cuit_dni, c.telefono
         ORDER BY c.nombre ASC
         LIMIT $limit OFFSET $off";
-
-
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
