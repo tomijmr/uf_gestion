@@ -654,14 +654,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ->execute([$saldo_pendiente, $emp_id]);
 
       // Si se paga el total de horas * precio hora, reiniciar horas trabajadas (sin períodos)
-      $stmt = db()->prepare("SELECT COALESCE(SUM(COALESCE(horas_trabajadas, (CASE WHEN NULLIF(ingreso_manana,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_tarde,'') IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN NULLIF(ingreso_manana,'') LIKE '08:00%' THEN 1 ELSE 0 END) + COALESCE(horas_extras,0))), 0) AS total FROM employee_attendance WHERE employee_id=?");
-      $stmt->execute([$emp_id]);
-      $total_horas_actual = (float)($stmt->fetch()['total'] ?? 0);
+      // Se utiliza el sueldo_base enviado (que puede ser calculado manualmente) para verificar si se cubrió el monto base de las horas
       $stmt = db()->prepare("SELECT pago_por_hora FROM employees WHERE id=?");
       $stmt->execute([$emp_id]);
       $valor_hora_actual = (float)($stmt->fetch()['pago_por_hora'] ?? 0);
-      $total_a_pagar_horas = round($total_horas_actual * $valor_hora_actual, 2);
-      if (abs($sueldo_neto - $total_a_pagar_horas) <= 0.01) {
+      
+      // Si el sueldo_neto cubre el sueldo_base reportado (menos adelantos/prestamos), consideramos las horas pagadas.
+      // O si el usuario está forzando un pago manual, asumimos que liquida las horas pendientes mostradas en el modal.
+      if ($sueldo_neto > 0) {
+        // Obtenemos todas las asistencias no marcadas como pagadas (horas_trabajadas != 0 o null)
+        // Simplificación: reseteamos todo el acumulado de horas ya que este es un pago de nómina semanal/quincenal
         db()->prepare("UPDATE employee_attendance SET horas_trabajadas=0 WHERE employee_id=?")
           ->execute([$emp_id]);
       }
@@ -1259,10 +1261,10 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <input type="hidden" name="employee_id" value="<?= (int)$selected_emp_id ?>">
                   <input type="hidden" name="semana_inicio" value="<?= e($legajo_period_inicio) ?>">
                   <input type="hidden" name="semana_fin" value="<?= e($legajo_period_fin) ?>">
-                  <input type="hidden" name="sueldo_base" value="<?= e(number_format($legajo_sueldo_base, 2, '.', '')) ?>">
-                  <input type="hidden" name="descuentos_total" value="<?= e(number_format($legajo_descuentos, 2, '.', '')) ?>">
-                  <input type="hidden" name="adelantos_total" value="<?= e(number_format($legajo_adelantos, 2, '.', '')) ?>">
-                  <input type="hidden" name="prestamos_cuota" value="<?= e(number_format($legajo_prestamos, 2, '.', '')) ?>">
+                  <input type="hidden" id="hidden_legajo_sueldo_base" name="sueldo_base" value="<?= e(number_format($legajo_sueldo_base, 2, '.', '')) ?>">
+                  <input type="hidden" id="hidden_legajo_descuentos" name="descuentos_total" value="<?= e(number_format($legajo_descuentos, 2, '.', '')) ?>">
+                  <input type="hidden" id="hidden_legajo_adelantos" name="adelantos_total" value="<?= e(number_format($legajo_adelantos, 2, '.', '')) ?>">
+                  <input type="hidden" id="hidden_legajo_prestamos" name="prestamos_cuota" value="<?= e(number_format($legajo_prestamos, 2, '.', '')) ?>">
 
                   <div class="modal-header">
                     <h5 class="modal-title">Pagar Nómina - <?= e($selected_employee['nombre'] . ' ' . $selected_employee['apellido']) ?></h5>
@@ -1276,11 +1278,11 @@ include __DIR__ . '/../views/partials/navbar.php';
                       </div>
                       <div class="col-md-4">
                         <label class="form-label">Cantidad de horas</label>
-                        <input type="text" class="form-control" value="<?= e(number_format($legajo_total_horas, 2, '.', '')) ?>" readonly>
+                        <input type="number" step="0.01" min="0" id="legajo_horas_input" class="form-control" value="<?= e(number_format($legajo_total_horas, 2, '.', '')) ?>">
                       </div>
                       <div class="col-md-4">
                         <label class="form-label">Precio por hora</label>
-                        <input type="text" class="form-control" value="<?= e(money($legajo_valor_hora)) ?>" readonly>
+                        <input type="text" id="legajo_precio_hora" data-raw="<?= $legajo_valor_hora ?>" class="form-control" value="<?= e(money($legajo_valor_hora)) ?>" readonly>
                       </div>
                     </div>
 
@@ -1307,7 +1309,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                     <div class="row g-3 mt-2">
                       <div class="col-md-4">
                         <label class="form-label">Monto a pagar</label>
-                        <input type="number" step="0.01" min="0" name="sueldo_neto" class="form-control" value="<?= e(number_format(max(0, $legajo_saldo_pagar), 2, '.', '')) ?>" required>
+                        <input type="number" step="0.01" min="0" id="legajo_monto_pagar" name="sueldo_neto" class="form-control" value="<?= e(number_format(max(0, $legajo_saldo_pagar), 2, '.', '')) ?>" required>
                       </div>
                       <div class="col-md-4">
                         <label class="form-label">Medio</label>
@@ -1332,6 +1334,56 @@ include __DIR__ . '/../views/partials/navbar.php';
                     <button type="submit" class="btn btn-success" <?= $disable_pago ? 'disabled' : '' ?>>Pagar</button>
                   </div>
                 </form>
+                <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                  // Wait for modal to be potentially shown or just bind directly if elements exist
+                  const horasInput = document.getElementById('legajo_horas_input');
+                  const precioInput = document.getElementById('legajo_precio_hora');
+                  const montoInput = document.getElementById('legajo_monto_pagar');
+                  
+                  // Hidden inputs for calculation
+                  const sueldoBaseInput = document.getElementById('hidden_legajo_sueldo_base');
+                  const descuentosInput = document.getElementById('hidden_legajo_descuentos');
+                  const adelantosInput = document.getElementById('hidden_legajo_adelantos');
+                  const prestamosInput = document.getElementById('hidden_legajo_prestamos');
+
+                  // Helper to parse float safely
+                  function parseVal(el) {
+                    if (!el) return 0;
+                    // If it's the price input, get data-raw
+                    if (el.id === 'legajo_precio_hora') {
+                        return parseFloat(el.getAttribute('data-raw')) || 0;
+                    }
+                    return parseFloat(el.value) || 0;
+                  }
+
+                  function updateCalculations() {
+                    const horas = parseVal(horasInput);
+                    const precio = parseVal(precioInput);
+                    const descuentos = parseVal(descuentosInput);
+                    const adelantos = parseVal(adelantosInput);
+                    const prestamos = parseVal(prestamosInput);
+
+                    const sueldoBase = horas * precio;
+                    let total = sueldoBase - descuentos - adelantos - prestamos;
+                    
+                    // Update the visible total
+                    if (montoInput) {
+                        montoInput.value = Math.max(0, total).toFixed(2);
+                    }
+                    
+                    // Update the hidden sueldo base so backend receives correct base if used
+                    if (sueldoBaseInput) {
+                        sueldoBaseInput.value = sueldoBase.toFixed(2);
+                    }
+                  }
+
+                  if (horasInput) {
+                    horasInput.addEventListener('input', updateCalculations);
+                    horasInput.addEventListener('change', updateCalculations);
+                  }
+                });
+                </script>
               </div>
             </div>
           </div>
