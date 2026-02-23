@@ -645,7 +645,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     body {
         margin: 0;
         padding: 0;
-        font-size: 10pt; /* Reduce font size for fitting */
+        font-size: 12pt;
         background-color: white !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -691,7 +691,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     
     /* Table optimizations */
     .table-responsive { overflow: visible !important; }
-    table { width: 100% !important; font-size: 9pt; }
+    table { width: 100% !important; font-size: 11pt; }
     th, td { padding: 4px !important; }
     
     /* Charts */
