@@ -1,322 +1,115 @@
-# Universal Fitness ERP - Sistema de Gestión
+# Universal Fitness ERP - Sistema de Gestión Integral
 
 ## 📋 Descripción General
 
-Sistema ERP (Enterprise Resource Planning) completo para la gestión de operaciones de Universal Fitness SA. Incluye módulos para gestión de clientes, pedidos, inventario, producción, nómina y recursos humanos.
+**Universal Fitness ERP** es una solución empresarial completa diseñada para la gestión integral de operaciones de manufactura y venta. El sistema abarca desde el primer contacto con el cliente hasta la entrega del producto final, pasando por una gestión detallada de la producción, inventarios, recursos humanos y finanzas.
 
-**Tecnología:** PHP 7.4+, PDO, MySQL/MariaDB, Bootstrap 5
-
----
-
-## 🎯 Características Principales
-
-### 1. **Gestión de Clientes**
-- Registro y edición de clientes
-- Historial de operaciones
-- Contactos y referencias
-- Búsqueda y filtrado avanzado
-
-### 2. **Gestión de Pedidos**
-- Creación de nuevos pedidos
-- Seguimiento del estado (PENDIENTE, EN PRODUCCIÓN, COMPLETADO, ENTREGADO)
-- Asignación de máquinas y operarios
-- Cálculo automático de costos
-- Generación de vouchers de pago
-
-### 3. **Inventario**
-- **Materias Primas:** Control de stock, alertas de stock bajo
-- **Máquinas/Productos Terminados:** Seguimiento de producción
-- Movimientos de stock con historial
-- Reportes de inventario
-
-### 4. **Producción**
-- Órdenes de producción (OP)
-- Asignación de recursos
-- Seguimiento de estado
-- Historial de operaciones
-
-### 5. **Nómina con Sistema de Períodos** ⭐
-Sistema avanzado de gestión de pagos de empleados con períodos semanales:
-
-#### Flujo de Nómina:
-- **Durante el Período Activo:**
-  - Base semanal definido por empleado
-  - Horas extras automáticamente sumadas
-  - Descuentos, adelantos y préstamos descontados
-  - **Saldo Actual = Base + Extras - Descuentos - Adelantos - Préstamos - Pagos Realizados**
-
-- **Registro de Pagos:**
-  - Se pueden hacer múltiples pagos en el mismo período
-  - No hay duplicación de saldos
-  - Visualización en tiempo real del saldo pendiente
-
-- **Cierre de Período:**
-  - Se calcula el saldo final del período
-  - Se crea automáticamente el nuevo período
-  - **El saldo del período anterior se suma al base semanal del nuevo período**
-  
-  **Ejemplo:**
-  ```
-  Período 1:
-  - Base: $300, Se paga: $290
-  - Saldo: $10
-  
-  Período 2 (después de cerrar):
-  - Base: $300 + Saldo anterior $10 = $310
-  - Si se paga $200: Nuevo saldo = $110
-  ```
-
-### 6. **Asistencia y Control de Personal**
-- Registro de asistencia con horas entrada/salida
-- Cálculo automático de horas extras
-- Histórico de asistencia por empleado
-
-### 7. **Recursos Humanos**
-- Legajo digital de empleados
-  - Datos personales
-  - Historial de incidencias
-  - Control de suspensiones y licencias
-- Adelantos de sueldo
-- Préstamos a empleados
-- Descuentos por faltas/llegadas tarde
-
-### 8. **Caja e Ingresos**
-- Registro de pagos recibidos
-- Cuenta corriente de clientes
-- Gestión de comprobantes/vouchers (almacenamiento seguro)
-- Desglose de ingresos por tipo de pago
-
-### 9. **Compras**
-- Registro de compras a proveedores
-- Seguimiento de pagos
-- Historial de compras
+Este sistema está optimizado para empresas de manufactura que requieren trazabilidad en su línea de producción, control estricto de stock y una gestión eficiente de su personal.
 
 ---
 
-## 👥 Sistema de Roles y Permisos
+## 🛠️ Stack Tecnológico
 
-### Roles Disponibles:
-
-| Rol | Dashboard | Clientes | Pedidos | Inventario | Producción | Empleados | Nómina | Admin |
-|-----|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **ADMIN** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (Todo) | ✅ | ✅ |
-| **VENTAS** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **PRODUCCION** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **DEPOSITO** | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **CAJA** | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ (Todo) | ✅ | ❌ |
-| **RRHH** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ (Solo Asistencia e Incidencias) | ❌ | ❌ |
-| **LECTURA** | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-
+- **Backend:** PHP 7.4+ (Sin frameworks pesados, arquitectura MVC ligera)
+- **Base de Datos:** MySQL / MariaDB
+- **Frontend:** Bootstrap 5, JavaScript (Vanilla + jQuery para componentes específicos)
+- **Reportes:** FPDF para generación de PDFs, Librerías de gráficos para Dashboard
+- **Infraestructura:** Compatible con XAMPP/LAMP/WAMP
 
 ---
 
-## 🗄️ Estructura de Base de Datos
+## 🚀 Módulos del Sistema
 
-### Tablas Principales:
+### 1. 🏭 Producción Avanzada
+El corazón del sistema, diseñado para un flujo de trabajo industrial.
+- **Workflow de 9 Estados:** Desde "Corte" hasta "Empaque" y "Despacho".
+- **Trazabilidad QR:** Generación de tickets de producción con códigos QR para seguimiento en planta.
+- **Control de Calidad (QC):** Puntos de aprobación obligatorios entre etapas críticas.
+- **Descuento de Stock por Etapa:** El sistema descuenta materias primas automáticamente según la etapa del proceso.
+- **Panel de Operarios:** Interfaz simplificada para que los operarios actualicen estados mediante escaneo o selección.
 
-#### Clientes
-```sql
-customers - id, nombre, email, telefono, direccion, etc.
-customer_ledger - Historial de operaciones por cliente
+### 2. 👥 Recursos Humanos y Nómina
+Sistema completo para la gestión del personal y sus pagos.
+- **Legajos Digitales:** Información completa, historial y documentación.
+- **Gestión de Asistencia:** Registro de entradas, salidas y horas extras.
+- **Nómina Semanal:**
+  - Cálculo automático basado en horas trabajadas o sueldo fijo.
+  - Gestión de **Períodos de Pago** (apertura y cierre).
+  - Manejo de **Adelantos, Préstamos y Descuentos**.
+  - Generación de recibos y reportes de pago.
+
+### 3. 📦 Inventario y Logística
+Control total sobre los materiales y productos.
+- **Materias Primas:** Stock en tiempo real, alertas de bajo stock, valoración de inventario.
+- **Productos Terminados:** Stock de productos listos para venta.
+- **Movimientos de Stock:** Registro de ingresos, egresos, ajustes y devoluciones.
+- **Reportes de Stock:** Análisis de movimientos y previsión de necesidades.
+
+### 4. 💼 Gestión Comercial (CRM)
+- **Clientes:** Base de datos con historial de compras, estados de cuenta y saldos (Deuda).
+- **Pedidos:** Creación, seguimiento y facturación de órdenes de venta.
+- **Presupuestos:** Generación y envío de cotizaciones que se convierten en pedidos.
+
+### 5. 💰 Finanzas y Compras
+- **Compras a Proveedores:** Gestión de órdenes de compra y recepción de mercadería.
+- **Caja Chica:** Control de gastos diarios y movimientos de efectivo.
+- **Auditoría:** Módulo avanzado (`auditoria.php`) para conciliación de caja, reportes de ventas vs. costos y detección de discrepancias.
+- **Dashboard de KPIs:** Indicadores clave de rendimiento en tiempo real (Ventas del día, Producción en curso, Cobranzas pendientes).
+
+---
+
+## 📂 Estructura del Proyecto
+
 ```
-
-#### Pedidos
-```sql
-orders - id, customer_id, fecha, estado, total
-order_items - Productos/máquinas en cada pedido
-```
-
-#### Empleados
-```sql
-employees - id, nombre, apellido, pago_semanal, pago_por_hora, saldo_pendiente, etc.
-employee_attendance - Asistencia diaria con horas extras
-employee_payroll - Registro de pagos realizados
-employee_incidents - Historial de incidencias/problemas
-employee_advances - Adelantos de sueldo
-employee_loans - Préstamos a empleados
-employee_discounts - Descuentos por faltas, etc.
-payroll_periods - Períodos semanales de nómina
-```
-
-#### Inventario
-```sql
-products - Materias primas
-products_backup - Backup de productos
-stock_moves - Movimientos de stock
-```
-
-#### Producción
-```sql
-production_orders - Órdenes de producción
-product_bom - Bill of Materials (recetas de productos)
-```
-
-#### Finanzas
-```sql
-payments - Pagos recibidos
-payment_vouchers - Comprobantes de pago
-cash_expenses - Gastos desde caja
-purchases - Compras a proveedores
-```
-
-#### Configuración
-```sql
-roles - Roles disponibles
-users - Usuarios del sistema
-audit_logs - Registro de auditoría de cambios
+/
+├── app/                  # Lógica de negocio y configuraciones
+│   ├── db.php            # Conexión a Base de Datos
+│   ├── auth.php          # Sistema de autenticación
+│   ├── kpis.php          # Indicadores de rendimiento
+│   └── ...
+├── public/               # Archivos accesibles vía web (Vistas + Controladores)
+│   ├── index.php         # Dashboard principal
+│   ├── pedidos.php       # Gestión de ventas
+│   ├── op.php            # Órdenes de Producción (Sistema Avanzado)
+│   ├── empleados.php     # Módulo de RRHH y Nómina
+│   ├── auditoria.php     # Reportes financieros  
+│   └── ...
+├── storage/              # Archivos generados, logs, uploads
+├── scripts/              # Scripts de mantenimiento y utilidades
+└── views/                # Fragmentos de vista reutilizables (partials)
 ```
 
 ---
 
-## 🔐 Seguridad
+## 🔧 Instalación y Despliegue
 
-### Medidas Implementadas:
-- ✅ Hashing de contraseñas con `password_hash()`
-- ✅ Validación de roles en cada acción sensible
-- ✅ Sanitización de entrada con `prepared statements`
-- ✅ Almacenamiento seguro de vouchers fuera de `public/`
-- ✅ Historial de auditoría de cambios
-- ✅ Gestión de sesiones segura
+### Requisitos Previos
+- Servidor Web (Apache/Nginx)
+- PHP 7.4 o superior
+- MySQL 5.7 o MariaDB 10.3+
 
-### Archivos Sensibles:
-- **Vouchers:** Almacenados en `/storage/vouchers/` (no público)
-- **Acceso:** A través de `voucher.php` con validación de usuario
-
----
-
-## 📱 Cómo Usar el Sistema
-
-### 1. **Login**
-- Ingresar email y contraseña
-- El sistema verifica el rol del usuario
-- Se redirige al dashboard
-
-### 2. **Dashboard**
-- Vista general del estado del negocio
-- Acceso rápido a módulos principales
-
-### 3. **Crear un Pedido**
-1. Ir a **Pedidos** → **Nuevo Pedido**
-2. Seleccionar cliente
-3. Agregar productos/máquinas con cantidades
-4. Asignar máquina/operario
-5. Guardar
-
-### 4. **Registrar Asistencia**
-1. Ir a **Empleados** → **Asistencia**
-2. Seleccionar empleado
-3. Registrar entrada mañana/tarde
-4. Ingresar horas extras si corresponde
-5. Guardar
-
-### 5. **Procesar Nómina**
-1. Ir a **Empleados** → **Nómina**
-2. El sistema muestra el saldo actual de cada empleado
-3. Hacer clic en **PAGAR**
-4. Ingresar monto a pagar
-5. Confirmar pago
-6. Al finalizar período: ir a **Períodos** → **Cerrar Período y Crear Nuevo**
-
-### 6. **Gestionar Inventario**
-1. Ir a **Materias Primas** o **Máquinas**
-2. Ver stock actual
-3. Hacer clic en producto para ver detalles
-4. Registrar movimientos desde **Stock**
+### Pasos de Instalación
+1. **Clonar el repositorio** en la carpeta pública del servidor web.
+2. **Base de Datos:**
+   - Crear una base de datos vacía (ej. `erp_mvp`).
+   - Importar `a0011086_erp_mvp_fulldb.sql` para la estructura base.
+   - Ejecutar los scripts de migración en orden si es una actualización:
+     - `sistema_produccion_avanzado.sql`
+     - `migracion_nomina_asistencias.sql`
+     - `agregar_columnas_iva.sql`
+3. **Configuración:**
+   - Editar `app/db.php` o configurar variables de entorno (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`).
+4. **Permisos:** Asegurar permisos de escritura en la carpeta `storage/`.
 
 ---
 
-## 🔧 Configuración Inicial
+## 📄 Notas de Versión
 
-### 1. Base de Datos
-```bash
-# Crear base de datos
-mysql -u root -p < migracion_dev_a_prod.sql
-```
-
-### 2. Crear Usuario Admin
-```sql
-INSERT INTO users (nombre, email, pass_hash, role, activo) 
-VALUES (
-  'Administrador',
-  'admin@ejemplo.com',
-  PASSWORD_HASH('contraseña_segura'),
-  'ADMIN',
-  1
-);
-```
-
-### 3. Crear Roles
-```sql
-INSERT INTO roles (nombre) VALUES ('Admin'), ('Ventas'), ('RRHH'), ('Caja'), ('Producción'), ('Depósito');
-```
-
-### 4. Crear Período Activo
-```sql
-INSERT INTO payroll_periods (fecha_inicio, fecha_fin, estado) 
-VALUES (CURDATE(), DATE_ADD(CURDATE(), INTERVAL 6 DAY), 'ACTIVO');
-```
+- **Versión Prod 2.0:** Integración completa de módulo de producción con QR y sistema de nómina semanal.
+- **Mejoras Recientes:**
+  - Sistema de deuda de clientes.
+  - Pagos manuales en nómina con cálculo dinámico.
+  - Auditoría financiera avanzada.
 
 ---
-
-## 📊 Reportes y Análisis
-
-### Reportes Disponibles:
-- 📈 Resumen de nómina por período
-- 📋 Historial de asistencia
-- 💰 Caja diaria
-- 📦 Movimientos de stock
-- 🎯 Órdenes de producción pendientes
-- 👥 Incidencias de empleados
-
----
-
-## 🐛 Solución de Problemas
-
-### "El saldo no se actualiza"
-- Verificar que el período esté ACTIVO en `payroll_periods`
-- Asegurarse que el `period_id` sea correcto en `employee_payroll`
-
-### "No veo el rol RRHH"
-- Ejecutar: `ALTER TABLE users MODIFY COLUMN role ENUM(...,'RRHH',...)`
-- Asignar rol: `UPDATE users SET role = 'RRHH' WHERE id = X`
-
-### "Los vouchers no se descargan"
-- Verificar ruta en `/storage/vouchers/`
-- Asegurarse que `voucher.php` tenga permisos de lectura
-
-### "Error en nómina después de cerrar período"
-- Verificar que todos los empleados tengan `saldo_pendiente` calculado
-- Confirmar que el nuevo período fue creado correctamente
-
----
-
-## 📞 Soporte y Desarrollo
-
-### Archivos Clave:
-- `app/auth.php` - Autenticación y roles
-- `app/db.php` - Conexión a BD
-- `app/helpers.php` - Funciones auxiliares
-- `public/empleados.php` - Gestión completa de nómina y empleados
-- `views/partials/navbar.php` - Menú y permisos por rol
-
-### Para Agregar Nuevas Funcionalidades:
-1. Crear archivo en `/public/`
-2. Agregar `require_login()` al inicio
-3. Usar `require_role()` si es necesario restringir
-4. Agregar entrada en navbar.php si es visible en menú
-
----
-
-## 📝 Notas Importantes
-
-- Los períodos se cierran **manualmente** desde la tab "Períodos"
-- El saldo se transfiere automáticamente al nuevo período
-- Las horas extras se calculan automáticamente desde asistencia
-- Los vouchers se almacenan sin ruta completa (solo nombre de archivo)
-- Todos los cambios se registran en `audit_logs`
-
----
-
-**Versión:** 1.0  
-**Última actualización:** Febrero 2026  
-**Desarrollado para:** Universal Fitness SA
+© 2026 Universal Fitness SA. Todos los derechos reservados.
