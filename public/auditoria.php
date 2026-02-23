@@ -189,7 +189,14 @@ include __DIR__ . '/../views/partials/navbar.php';
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <div class="container-fluid py-4">
-    <!-- Header y Filtros -->
+    <!-- Print Header -->
+    <div class="print-header">
+        <h3 class="text-center mb-0">Reporte de Auditoría Financiera</h3>
+        <p class="text-center mb-0">Período: <?= date('d/m/Y', strtotime($start_date)) ?> al <?= date('d/m/Y', strtotime($end_date)) ?></p>
+        <div class="text-center small text-muted mb-3">Universal Fitness - Generado: <?= date('d/m/Y H:i') ?></div>
+    </div>
+
+    <!-- Header y Filtros (Hidden on Print via CSS) -->
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
         <h2 class="mb-0 fw-bold text-primary"><i class="bi bi-bar-chart-line-fill"></i> Auditoría</h2>
         
@@ -632,41 +639,88 @@ include __DIR__ . '/../views/partials/navbar.php';
 @media print {
     @page {
         size: A4 landscape;
-        margin: 1cm;
+        margin: 5mm;
     }
     
-    /* Hide non-essential elements */
-    nav, .btn, form, footer, .bi-arrow-clockwise, button, a {
-        display: none !important;
+    body {
+        margin: 0;
+        padding: 0;
+        font-size: 10pt; /* Reduce font size for fitting */
+        background-color: white !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
-    /* Expand container */
+
+    /* Hide non-essential UI */
+    nav, .navbar, header, footer, .btn, form, .no-print, .bi, button, a[href] { 
+        display: none !important; 
+    }
+    
+    /* Remove shadows and borders that clutter print */
+    .shadow-sm { box-shadow: none !important; }
+    .card { border: 1px solid #ccc !important; break-inside: avoid; }
+    
+    /* Layout Adjustments */
     .container-fluid {
         width: 100% !important;
+        max-width: none !important;
         padding: 0 !important;
         margin: 0 !important;
     }
-    /* Card borders for print clarity */
-    .card {
-        border: 1px solid #ddd !important;
-        box-shadow: none !important;
-        break-inside: avoid;
+
+    /* Force Grid System to show columns side-by-side (Bootstrap Print Fix) */
+    .row {
+        display: flex !important;
+        flex-wrap: nowrap !important;
     }
-    /* Colors */
-    .bg-primary { background-color: #0d6efd !important; color: white !important; -webkit-print-color-adjust: exact; }
-    .text-success { color: #198754 !important; -webkit-print-color-adjust: exact; }
-    .text-danger { color: #dc3545 !important; -webkit-print-color-adjust: exact; }
+    .col-md-3, .col-md-4, .col-md-6, .col-md-8 {
+        flex: 0 0 auto !important;
+    }
+    .col-md-3 { width: 25% !important; }
+    .col-md-4 { width: 33.333% !important; }
+    .col-md-6 { width: 50% !important; }
+    .col-md-8 { width: 66.666% !important; }
     
-    /* Ensure charts print */
+    /* Adjust specific sections */
+    .card-header {
+        background-color: #f8f9fa !important;
+        border-bottom: 1px solid #dee2e6 !important;
+        padding: 0.5rem !important;
+    }
+    .card-body { padding: 0.5rem !important; }
+    
+    /* Table optimizations */
+    .table-responsive { overflow: visible !important; }
+    table { width: 100% !important; font-size: 9pt; }
+    th, td { padding: 4px !important; }
+    
+    /* Charts */
     canvas {
-        max-width: 100% !important;
-        max-height: 100% !important;
+        max-height: 200px !important;
+        width: 100% !important;
     }
     
-    /* Font sizes */
-    body { font-size: 10pt; }
-    h2, h3 { color: #000 !important; }
+    /* Header Report Title */
+    .print-header {
+        display: block !important;
+        text-align: center;
+        margin-bottom: 10px;
+        border-bottom: 2px solid #333;
+        padding-bottom: 5px;
+    }
+    
+    /* Colors */
+    .bg-primary { background-color: #0d6efd !important; color: white !important; }
+    .bg-success { background-color: #198754 !important; color: white !important; }
+    .bg-danger { background-color: #dc3545 !important; color: white !important; }
+    .text-success { color: #198754 !important; }
+    .text-danger { color: #dc3545 !important; }
 }
+
+/* Helper for Print Header (Hidden on Screen) */
+.print-header { display: none; }
 </style>
+
 
 <!-- Scripts ChartJS -->
 <script>
