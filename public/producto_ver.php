@@ -70,6 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $activo = isset($_POST['activo']) ? 1 : 0;
       $margen = isset($_POST['margen_pct']) ? (float)$_POST['margen_pct'] : 30.0;
       $stock_minimo = isset($_POST['stock_minimo']) ? (float)$_POST['stock_minimo'] : 0;
+      $metros_cuadrados = isset($_POST['metros_cuadrados']) ? (float)$_POST['metros_cuadrados'] : 0;
       
       // Capturamos el costo_std que viene del formulario si es MP.
       $costo_std = (float)($_POST['costo_std'] ?? 0); 
@@ -79,8 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       if ($id > 0) {
         // Construimos los campos y parámetros en el mismo orden para evitar desajustes
-        $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?";
-        $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo];
+        $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?, metros_cuadrados=?";
+        $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo, $metros_cuadrados];
 
         if ($tipo === 'MP') {
             // Para MP actualizamos precio_std y costo_std al final
@@ -107,9 +108,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $precio_std_insert = ($tipo === 'MP') ? $precio : $precio;
         
         $sql = "INSERT INTO products
-                   (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo)
-                VALUES (?,?,?,?,?,?,0,0,?,?,?)";
-        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo]);
+                   (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo, metros_cuadrados)
+                VALUES (?,?,?,?,?,?,0,0,?,?,?,?)";
+        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo, $metros_cuadrados]);
         $id = (int)db()->lastInsertId();
 
         // No refrescar precio al crear nuevo PT - se deja con el precio ingresado
@@ -232,6 +233,7 @@ $row = [
   'stock_reservado' => 0,
   'stock_minimo' => 0,
   'margen_pct' => 30.00,
+  'metros_cuadrados' => 0,
 ];
 if ($id > 0) {
   $s = db()->prepare("SELECT * FROM products WHERE id=?");
@@ -318,6 +320,12 @@ include __DIR__ . '/../views/partials/navbar.php';
           <label class="form-label">Stock mínimo</label>
           <input name="stock_minimo" type="number" step="0.001" min="0" class="form-control" value="<?= (float)$row['stock_minimo'] ?>">
           <div class="form-text">Alerta si disponible ≤ mínimo.</div>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">Metros Cuadrados</label>
+          <input name="metros_cuadrados" type="number" step="0.0001" min="0" class="form-control" value="<?= (float)($row['metros_cuadrados'] ?? 0) ?>">
+          <div class="form-text">Superficie total (m²).</div>
         </div>
 
         <div class="col-md-2">

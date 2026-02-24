@@ -158,7 +158,7 @@ $pages = max(1, (int)ceil($total / $limit));
 $sql = "
   SELECT
     p.id, p.codigo, p.nombre, p.tipo, p.unidad, p.precio_std, p.costo_std,
-    p.stock_actual, p.stock_reservado, p.stock_minimo,
+    p.stock_actual, p.stock_reservado, p.stock_minimo, p.metros_cuadrados,
     (p.stock_actual - p.stock_reservado) AS stock_disponible,
     p.activo, p.margen_pct,
     COALESCE(bc.costo_bom, 0) AS costo_bom
@@ -268,6 +268,7 @@ function badge_margen(?float $m): string {
               <th>Nombre</th>
               <th class="text-center">Tipo</th>
               <th>Unidad</th>
+              <th class="text-end" title="Metros Cuadrados">m²</th>
               <th class="text-end" title="Precio de venta estándar">Precio Venta</th>
               <th class="text-end" title="Costo Estándar (última compra MP)">Costo Est.</th>
               
@@ -311,6 +312,7 @@ function badge_margen(?float $m): string {
               <td><?= e($r['nombre']) ?></td>
               <td class="text-center"><?= e($r['tipo']) ?></td>
               <td><?= e($r['unidad']) ?></td>
+              <td class="text-end"><?= (float)($r['metros_cuadrados'] ?? 0) ?></td>
               <td class="text-end"><?= money($precio) ?></td>
               <td class="text-end fw-bold"><?= money($costoStd) ?></td>
               

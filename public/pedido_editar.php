@@ -24,7 +24,7 @@ function load_order(int $order_id) {
 }
 
 function load_items(int $order_id): array {
-  $s = db()->prepare("SELECT oi.product_id, p.codigo, p.nombre, oi.cant, oi.precio_unit, oi.subtotal
+  $s = db()->prepare("SELECT oi.product_id, p.codigo, p.nombre, oi.cant, oi.precio_unit, oi.subtotal, p.metros_cuadrados
                       FROM order_items oi
                       JOIN products p ON p.id=oi.product_id
                       WHERE oi.order_id=?");
@@ -60,6 +60,7 @@ if (!isset($_SESSION['pedido_edit'][$order_id]) || isset($_GET['reset'])) {
         'precio' => (float)$it['precio_unit'],
         'cant' => (float)$it['cant'],
         'subtotal' => (float)$it['subtotal'],
+        'metros_cuadrados' => (float)($it['metros_cuadrados'] ?? 0),
       ];
     }, $db_items),
   ];
@@ -72,8 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'add_item') {
     $pid = (int)($_POST['product_id'] ?? 0);
-    $cant = max(1, (float)($_POST['cant'] ?? 1));
-    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std FROM products WHERE id=? AND activo=1");
+    $cant = max(1, (float)($_POST['cant'] ?? 1));, metros_cuadrados FROM products WHERE id=? AND activo=1");
     $stmt->execute([$pid]);
     if ($prod = $stmt->fetch()) {
       if ($prod['tipo'] !== 'PT') {
@@ -81,11 +81,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       } else {
         $precio = (float)$prod['precio_std'];
         $subtotal = $precio * $cant;
+        $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
         $found = false;
         foreach ($P['items'] as &$it) {
           if ((int)$it['product_id'] === (int)$pid) {
             $it['cant'] += $cant;
             $it['subtotal'] = $it['cant'] * $it['precio'];
+            // Asumimos que los metros cuadrados son constantes por producto, actualizamos por si cambiaron
+            $it['metros_cuadrados'] = $metros_cuadrados;
             $found = true;
             break;
           }
@@ -99,17 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'precio' => $precio,
             'cant' => $cant,
             'subtotal' => $subtotal,
+            'metros_cuadrados' => $metros_cuadrados
+            'subtotal' => $subtotal,
           ];
         }
       }
     }
   }
 
-  if ($action === 'add_item_by_code') {
-    $codigo = trim($_POST['codigo'] ?? '');
-    $cant = max(1, (float)($_POST['cant'] ?? 1));
-    if ($codigo !== '') {
-      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std FROM products WHERE codigo=? AND activo=1");
+  if ($action === 'add_item_by_code') {, metros_cuadrados FROM products WHERE codigo=? AND activo=1");
       $stmt->execute([$codigo]);
       if ($prod = $stmt->fetch()) {
         if ($prod['tipo'] !== 'PT') {
@@ -117,11 +118,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
           $precio = (float)$prod['precio_std'];
           $subtotal = $precio * $cant;
+          $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
           $found = false;
           foreach ($P['items'] as &$it) {
             if ((int)$it['product_id'] === (int)$prod['id']) {
               $it['cant'] += $cant;
               $it['subtotal'] = $it['cant'] * $it['precio'];
+              $it['metros_cuadrados'] = $metros_cuadrados;
               $found = true;
               break;
             }
@@ -131,6 +134,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $P['items'][] = [
               'product_id' => (int)$prod['id'],
               'codigo' => $prod['codigo'],
+              'nombre' => $prod['nombre'],
+              'precio' => $precio,
+              'cant' => $cant,
+              'subtotal' => $subtotal,
+              'metros_cuadrados' => $metros_cuadradosgo'],
               'nombre' => $prod['nombre'],
               'precio' => $precio,
               'cant' => $cant,
@@ -421,6 +429,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <tr>
                   <th>Codigo</th>
                   <th>Nombre</th>
+                  <th class="text-end" title="Metros Cuadrados Totales">Total m²</th>
                   <th class="text-end">Precio</th>
                   <th class="text-end">Cant</th>
                   <th class="text-end">Subtotal</th>
@@ -428,10 +437,21 @@ include __DIR__ . '/../views/partials/navbar.php';
                 </tr>
               </thead>
               <tbody>
-                <?php foreach ($items as $it): ?>
+                <?php $total_m2 = 0; ?>
+                <?php foreach ($items as $it): 
+                  $m2_unit = (float)($it['metros_cuadrados'] ?? 0);
+                  $m2_row = $m2_unit * (float)$it['cant'];
+                  $total_m2 += $m2_row;
+                ?>
                   <tr>
                     <td><?= e($it['codigo']) ?></td>
-                    <td><?= e($it['nombre']) ?></td>
+                    <td>
+                        <?= e($it['nombre']) ?>
+                        <?php if ($m2_unit > 0): ?>
+                            <div class="small text-muted">(<?= $m2_unit ?> m²/u)</div>
+                        <?php endif; ?>
+                    </td>
+                    <td class="text-end"><?= $m2_row > 0 ? number_format($m2_row, 4) : '-' ?></td>
                     <td class="text-end" style="width:140px;">
                       <input class="form-control form-control-sm text-end" type="number" step="0.01" min="0" name="precio[<?= (int)$it['product_id'] ?>]" value="<?= e(number_format((float)$it['precio'], 2, '.', '')) ?>">
                     </td>
@@ -452,7 +472,10 @@ include __DIR__ . '/../views/partials/navbar.php';
             </table>
           </div>
           <div class="d-flex justify-content-between align-items-center">
-            <div class="text-muted">Total: <?= money(pedido_edit_total_bruto($items)) ?></div>
+            <div class="text-muted">
+                <span class="me-3" title="Total Metros Cuadrados"><strong><?= number_format($total_m2, 0) ?></strong> m²</span>
+                <span>Total $: <strong><?= money(pedido_edit_total_bruto($items)) ?></strong></span>
+            </div>
             <button class="btn btn-outline-primary btn-sm">Actualizar</button>
           </div>
         </form>

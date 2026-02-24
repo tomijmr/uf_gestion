@@ -1,0 +1,1 @@
+ALTER TABLE products ADD COLUMN IF NOT EXISTS metros_cuadrados DECIMAL(10,4) DEFAULT 0.0000 AFTER stock_minimo;

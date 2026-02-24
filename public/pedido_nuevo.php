@@ -50,7 +50,7 @@ if (isset($_GET['export_presupuesto'])) {
         $order['cuit_dni'] = '-';
     }
 
-    $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
+    $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre, p.metros_cuadrados
                                 FROM order_items oi
                                 JOIN products p ON p.id = oi.product_id
                                 WHERE oi.order_id = ?");
@@ -81,6 +81,7 @@ if (isset($_GET['export_presupuesto'])) {
         'cant' => $it['cant'],
         'precio_unit' => $it['precio'],
         'subtotal' => $it['subtotal'],
+        'metros_cuadrados' => (float)($it['metros_cuadrados'] ?? 0),
       ];
     }, $P['items'] ?? []);
 
@@ -150,17 +151,28 @@ if (isset($_GET['export_presupuesto'])) {
           <tr>
             <th>Código</th>
             <th>Producto</th>
+            <th class="text-end">m² Total</th>
             <th class="text-end">Cantidad</th>
             <th class="text-end">Precio</th>
             <th class="text-end">Subtotal</th>
           </tr>
         </thead>
         <tbody>
-          <?php foreach ($items as $it): ?>
+          <?php $total_m2 = 0; ?>
+          <?php foreach ($items as $it): 
+            $m2 = (float)($it['metros_cuadrados'] ?? 0);
+            $cant = (float)$it['cant'];
+            $row_m2 = $m2 * $cant;
+            $total_m2 += $row_m2;
+          ?>
             <tr>
               <td><?= e($it['codigo']) ?></td>
-              <td><?= e($it['nombre']) ?></td>
-              <td class="text-end"><?= (float)$it['cant'] ?></td>
+              <td>
+                <?= e($it['nombre']) ?>
+                <?php if ($m2 > 0): ?><div style="font-size:11px; color:#666;">(<?= $m2 ?> m²/u)</div><?php endif; ?>
+              </td>
+              <td class="text-end"><?= $row_m2 > 0 ? number_format($row_m2, 4) : '-' ?></td>
+              <td class="text-end"><?= $cant ?></td>
               <td class="text-end"><?= money($it['precio_unit']) ?></td>
               <td class="text-end"><?= money($it['subtotal']) ?></td>
             </tr>
@@ -169,6 +181,7 @@ if (isset($_GET['export_presupuesto'])) {
       </table>
 
       <div class="totals">
+        <div style="border-bottom: 1px solid #eee; margin-bottom: 5px;"><span>m² Total</span><strong><?= number_format($total_m2, 0) ?></strong></div>
         <div><span>Subtotal</span><strong><?= money($order['total_bruto']) ?></strong></div>
         <div><span>Descuento</span><strong><?= money($order['descuento']) ?></strong></div>
         <div><span>Total Neto</span><strong><?= money($order['total_neto']) ?></strong></div>
@@ -324,7 +337,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (($_POST['action'] ?? '') === 'add_item') {
     $pid = (int)($_POST['product_id'] ?? 0);
     $cant = max(1, (float)($_POST['cant'] ?? 1));
-    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std FROM products WHERE id=? AND activo=1");
+    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE id=? AND activo=1");
     $stmt->execute([$pid]);
     if ($prod = $stmt->fetch()) {
       if ($prod['tipo'] !== 'PT') {
@@ -332,12 +345,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       } else {
         $precio = (float)$prod['precio_std'];
         $subtotal = $precio * $cant;
+        $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
 
         $found = false;
         foreach ($P['items'] as &$it) {
           if ((int)$it['product_id'] === (int)$pid) {
             $it['cant'] += $cant;
             $it['subtotal'] = $it['cant'] * $it['precio'];
+            $it['metros_cuadrados'] = $metros_cuadrados;
             $found = true; break;
           }
         } unset($it);
@@ -350,6 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'precio'     => $precio,
             'cant'       => $cant,
             'subtotal'   => $subtotal,
+            'metros_cuadrados' => $metros_cuadrados,
           ];
         }
       }
@@ -362,7 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $codigo = trim($_POST['codigo'] ?? '');
     $cant = max(1, (float)($_POST['cant'] ?? 1));
     if ($codigo !== '') {
-      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std FROM products WHERE codigo=? AND activo=1");
+      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE codigo=? AND activo=1");
       $stmt->execute([$codigo]);
       if ($prod = $stmt->fetch()) {
         if ($prod['tipo'] !== 'PT') {
@@ -370,12 +386,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
           $precio = (float)$prod['precio_std'];
           $subtotal = $precio * $cant;
+          $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
 
           $found = false;
           foreach ($P['items'] as &$it) {
             if ((int)$it['product_id'] === (int)$prod['id']) {
               $it['cant'] += $cant;
               $it['subtotal'] = $it['cant'] * $it['precio'];
+              $it['metros_cuadrados'] = $metros_cuadrados;
               $found = true; break;
             }
           } unset($it);
@@ -388,6 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               'precio'     => $precio,
               'cant'       => $cant,
               'subtotal'   => $subtotal,
+              'metros_cuadrados' => $metros_cuadrados,
             ];
           }
         }

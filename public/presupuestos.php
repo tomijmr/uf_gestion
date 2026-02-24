@@ -73,7 +73,11 @@ $total_rows = $stmtC->fetchColumn();
 $total_pages = ceil($total_rows / $limit);
 
 // Data
-$sql = "SELECT o.*, COALESCE(c.nombre, o.cliente_manual) as cliente 
+$sql = "SELECT o.*, COALESCE(c.nombre, o.cliente_manual) as cliente,
+        (SELECT SUM(oi.cant * p.metros_cuadrados) 
+         FROM order_items oi 
+         JOIN products p ON p.id = oi.product_id 
+         WHERE oi.order_id = o.id) as total_m2
         FROM orders o
         LEFT JOIN customers c ON c.id=o.customer_id
         WHERE $whereSql
@@ -140,7 +144,8 @@ include __DIR__ . '/../views/partials/navbar.php';
           <th>ID</th>
           <th>Fecha</th>
           <th>Cliente</th>
-          <th class="text-end">Total</th>
+          <th class="text-end">Total m²</th>
+          <th class="text-end">Total $</th>
           <th class="text-center">Acciones</th>
         </tr>
       </thead>
@@ -153,6 +158,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               <td>#<?= (int)$o['id'] ?></td>
               <td><?= date('d/m/Y H:i', strtotime($o['fecha'])) ?></td>
               <td><?= e($o['cliente']) ?></td>
+              <td class="text-end"><?= number_format((float)$o['total_m2'], 0) ?></td>
               <td class="text-end fw-bold">$<?= number_format((float)$o['total_neto'], 2, ',', '.') ?></td>
               <td class="text-center">
                 <a href="<?= url('pedido_editar.php?order_id=' . $o['id']) ?>" class="btn btn-sm btn-outline-primary" title="Editar / Ver">
