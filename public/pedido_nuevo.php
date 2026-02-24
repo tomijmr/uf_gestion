@@ -39,7 +39,7 @@ if (isset($_GET['export_presupuesto'])) {
 
     if (!$order) {
       http_response_code(404);
-      echo "Presupuesto no encontrado";
+      echo "<h1>No encontrado</h1><p>El presupuesto #{$order_id} no existe.</p>";
       exit;
     }
     
@@ -62,6 +62,7 @@ if (isset($_GET['export_presupuesto'])) {
     $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
     $total_con_iva = (float)$order['total_neto'] + $iva_monto;
   } else {
+
     $order = [
       'cliente_nombre' => null,
       'cuit_dni' => null,
