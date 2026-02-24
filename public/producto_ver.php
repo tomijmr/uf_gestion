@@ -71,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $margen = isset($_POST['margen_pct']) ? (float)$_POST['margen_pct'] : 30.0;
       $stock_minimo = isset($_POST['stock_minimo']) ? (float)$_POST['stock_minimo'] : 0;
       $metros_cuadrados = isset($_POST['metros_cuadrados']) ? (float)$_POST['metros_cuadrados'] : 0;
+      $video_url = trim($_POST['video_url'] ?? '');
       
       // Capturamos el costo_std que viene del formulario si es MP.
       $costo_std = (float)($_POST['costo_std'] ?? 0); 
@@ -80,8 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       if ($id > 0) {
         // Construimos los campos y parámetros en el mismo orden para evitar desajustes
-        $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?, metros_cuadrados=?";
-        $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo, $metros_cuadrados];
+        $setFields = "codigo=?, nombre=?, tipo=?, unidad=?, activo=?, margen_pct=?, stock_minimo=?, metros_cuadrados=?, video_url=?";
+        $params = [$codigo, $nombre, $tipo, $unidad, $activo, $margen, $stock_minimo, $metros_cuadrados, $video_url];
 
         if ($tipo === 'MP') {
             // Para MP actualizamos precio_std y costo_std al final
@@ -108,9 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $precio_std_insert = ($tipo === 'MP') ? $precio : $precio;
         
         $sql = "INSERT INTO products
-                   (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo, metros_cuadrados)
-                VALUES (?,?,?,?,?,?,0,0,?,?,?,?)";
-        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo, $metros_cuadrados]);
+                   (codigo, nombre, tipo, unidad, costo_std, precio_std, stock_actual, stock_reservado, activo, margen_pct, stock_minimo, metros_cuadrados, video_url)
+                VALUES (?,?,?,?,?,?,0,0,?,?,?,?,?)";
+        db()->prepare($sql)->execute([$codigo, $nombre, $tipo, $unidad, $costo_std_insert, $precio_std_insert, $activo, $margen, $stock_minimo, $metros_cuadrados, $video_url]);
         $id = (int)db()->lastInsertId();
 
         // No refrescar precio al crear nuevo PT - se deja con el precio ingresado
@@ -326,6 +327,14 @@ include __DIR__ . '/../views/partials/navbar.php';
           <label class="form-label">Metros Cuadrados</label>
           <input name="metros_cuadrados" type="number" step="0.0001" min="0" class="form-control" value="<?= (float)($row['metros_cuadrados'] ?? 0) ?>">
           <div class="form-text">Superficie total (m²).</div>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Video URL (YouTube)</label>
+          <input name="video_url" class="form-control" value="<?= e($row['video_url'] ?? '') ?>" placeholder="https://www.youtube.com/watch?v=...">
+          <?php if (!empty($row['video_url'])): ?>
+            <div class="form-text"><a href="<?= e($row['video_url']) ?>" target="_blank">Ver video actual</a></div>
+          <?php endif; ?>
         </div>
 
         <div class="col-md-2">

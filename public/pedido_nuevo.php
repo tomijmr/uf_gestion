@@ -50,7 +50,7 @@ if (isset($_GET['export_presupuesto'])) {
         $order['cuit_dni'] = '-';
     }
 
-    $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre, p.metros_cuadrados
+    $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre, p.metros_cuadrados, p.video_url
                                 FROM order_items oi
                                 JOIN products p ON p.id = oi.product_id
                                 WHERE oi.order_id = ?");
@@ -82,6 +82,7 @@ if (isset($_GET['export_presupuesto'])) {
         'precio_unit' => $it['precio'],
         'subtotal' => $it['subtotal'],
         'metros_cuadrados' => (float)($it['metros_cuadrados'] ?? 0),
+        'video_url' => $it['video_url'] ?? '',
       ];
     }, $P['items'] ?? []);
 
@@ -170,6 +171,13 @@ if (isset($_GET['export_presupuesto'])) {
               <td>
                 <?= e($it['nombre']) ?>
                 <?php if ($m2 > 0): ?><div style="font-size:11px; color:#666;">(<?= $m2 ?> m²/u)</div><?php endif; ?>
+                <?php if (!empty($it['video_url'])): ?>
+                   <div style="margin-top:2px;">
+                     <a href="<?= e($it['video_url']) ?>" target="_blank" style="font-size:12px; color:#d32f2f; text-decoration:none;">
+                       ▶ Ver Video
+                     </a>
+                   </div>
+                <?php endif; ?>
               </td>
               <td class="text-end"><?= $row_m2 > 0 ? number_format($row_m2, 4) : '-' ?></td>
               <td class="text-end"><?= $cant ?></td>
@@ -337,7 +345,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (($_POST['action'] ?? '') === 'add_item') {
     $pid = (int)($_POST['product_id'] ?? 0);
     $cant = max(1, (float)($_POST['cant'] ?? 1));
-    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE id=? AND activo=1");
+    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados, video_url FROM products WHERE id=? AND activo=1");
     $stmt->execute([$pid]);
     if ($prod = $stmt->fetch()) {
       if ($prod['tipo'] !== 'PT') {
@@ -346,6 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $precio = (float)$prod['precio_std'];
         $subtotal = $precio * $cant;
         $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
+        $video_url = $prod['video_url'] ?? '';
 
         $found = false;
         foreach ($P['items'] as &$it) {
@@ -353,6 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $it['cant'] += $cant;
             $it['subtotal'] = $it['cant'] * $it['precio'];
             $it['metros_cuadrados'] = $metros_cuadrados;
+            $it['video_url'] = $video_url;
             $found = true; break;
           }
         } unset($it);
@@ -366,6 +376,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'cant'       => $cant,
             'subtotal'   => $subtotal,
             'metros_cuadrados' => $metros_cuadrados,
+            'video_url'  => $video_url,
           ];
         }
       }
@@ -378,7 +389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $codigo = trim($_POST['codigo'] ?? '');
     $cant = max(1, (float)($_POST['cant'] ?? 1));
     if ($codigo !== '') {
-      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE codigo=? AND activo=1");
+      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados, video_url FROM products WHERE codigo=? AND activo=1");
       $stmt->execute([$codigo]);
       if ($prod = $stmt->fetch()) {
         if ($prod['tipo'] !== 'PT') {
@@ -387,6 +398,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $precio = (float)$prod['precio_std'];
           $subtotal = $precio * $cant;
           $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
+          $video_url = $prod['video_url'] ?? '';
 
           $found = false;
           foreach ($P['items'] as &$it) {
@@ -394,6 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               $it['cant'] += $cant;
               $it['subtotal'] = $it['cant'] * $it['precio'];
               $it['metros_cuadrados'] = $metros_cuadrados;
+              $it['video_url'] = $video_url;
               $found = true; break;
             }
           } unset($it);
@@ -407,6 +420,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               'cant'       => $cant,
               'subtotal'   => $subtotal,
               'metros_cuadrados' => $metros_cuadrados,
+              'video_url'  => $video_url,
             ];
           }
         }
