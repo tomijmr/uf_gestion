@@ -73,7 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'add_item') {
     $pid = (int)($_POST['product_id'] ?? 0);
-    $cant = max(1, (float)($_POST['cant'] ?? 1));, metros_cuadrados FROM products WHERE id=? AND activo=1");
+    $cant = max(1, (float)($_POST['cant'] ?? 1));
+    $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE id=? AND activo=1");
     $stmt->execute([$pid]);
     if ($prod = $stmt->fetch()) {
       if ($prod['tipo'] !== 'PT') {
@@ -102,15 +103,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'precio' => $precio,
             'cant' => $cant,
             'subtotal' => $subtotal,
-            'metros_cuadrados' => $metros_cuadrados
-            'subtotal' => $subtotal,
+            'metros_cuadrados' => $metros_cuadrados,
           ];
         }
       }
     }
   }
 
-  if ($action === 'add_item_by_code') {, metros_cuadrados FROM products WHERE codigo=? AND activo=1");
+  if ($action === 'add_item_by_code') {
+    $codigo = trim($_POST['codigo'] ?? '');
+    $cant = max(1, (float)($_POST['cant'] ?? 1));
+    if ($codigo !== '') {
+      $stmt = db()->prepare("SELECT id, codigo, nombre, tipo, precio_std, metros_cuadrados FROM products WHERE codigo=? AND activo=1");
       $stmt->execute([$codigo]);
       if ($prod = $stmt->fetch()) {
         if ($prod['tipo'] !== 'PT') {
@@ -138,11 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               'precio' => $precio,
               'cant' => $cant,
               'subtotal' => $subtotal,
-              'metros_cuadrados' => $metros_cuadradosgo'],
-              'nombre' => $prod['nombre'],
-              'precio' => $precio,
-              'cant' => $cant,
-              'subtotal' => $subtotal,
+              'metros_cuadrados' => $metros_cuadrados,
             ];
           }
         }
