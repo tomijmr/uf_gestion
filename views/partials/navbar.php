@@ -54,7 +54,7 @@ $MENU = [
     'id'    => 'navCaja',
     'roles' => ['ADMIN','CAJA','RRHH', 'DEPOSITO'],
     'items' => [
-      ['label' => 'Caja',      'href' => url('caja.php'),      'roles' => ['ADMIN','CAJA']],
+      ['label' => 'Caja',      'href' => url('caja.php'),      'roles' => ['ADMIN','CAJA', 'RRHH']],
       ['label' => 'Compras',   'href' => url('compras.php'),   'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO']],
     ]
   ],
