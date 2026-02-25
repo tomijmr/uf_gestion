@@ -4,6 +4,10 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+
 // Exportar presupuesto en HTML (para imprimir a PDF)
 if (isset($_GET['export_presupuesto'])) {
   if (!isset($_SESSION['pedido'])) {
