@@ -23,11 +23,11 @@ $MENU = [
   [
     'label' => 'Clientes',
     'id'    => 'navClientes',
-    'roles' => ['ADMIN','VENTAS','LECTURA','RRHH'],
+    'roles' => ['ADMIN','VENTAS','LECTURA','RRHH','DEPOSITO'],
     'items' => [
-      ['label' => 'Clientes',     'href' => url('clientes.php'),     'roles' => ['ADMIN','VENTAS','LECTURA','RRHH']],
-      ['label' => 'Presupuestos', 'href' => url('presupuestos.php'), 'roles' => ['ADMIN','VENTAS','RRHH']],
-      ['label' => 'Pedidos',      'href' => url('pedidos.php'),      'roles' => ['ADMIN','VENTAS','RRHH']],
+      ['label' => 'Clientes',     'href' => url('clientes.php'),     'roles' => ['ADMIN','VENTAS','LECTURA','RRHH','DEPOSITO']],
+      ['label' => 'Presupuestos', 'href' => url('presupuestos.php'), 'roles' => ['ADMIN','VENTAS','RRHH','DEPOSITO']],
+      ['label' => 'Pedidos',      'href' => url('pedidos.php'),      'roles' => ['ADMIN','VENTAS','RRHH','DEPOSITO']],
     ]
   ],
 
