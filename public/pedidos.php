@@ -133,7 +133,7 @@ $total = (int)($st->fetch()['total'] ?? 0);
 $pages = max(1, (int)ceil($total / $limit));
 
 // Datos
-$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.transporte_bonificado, o.empresa_transporte, COALESCE(c.nombre, o.cliente_manual) AS cliente
+$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.observaciones, o.transporte_bonificado, o.empresa_transporte, COALESCE(c.nombre, o.cliente_manual) AS cliente
         FROM orders o
         LEFT JOIN customers c ON c.id=o.customer_id
         $whereSql
@@ -312,6 +312,12 @@ include __DIR__ . '/../views/partials/navbar.php';
                         </tbody>
                       </table>
                     </div>
+
+                    <?php if (!empty($r['observaciones'])): ?>
+                      <div class="mt-3 p-2 bg-warning bg-opacity-10 border border-warning rounded">
+                        <strong>Notas:</strong> <?= nl2br(e($r['observaciones'])) ?>
+                      </div>
+                    <?php endif; ?>
                   </div>
                 </td>
               </tr>
