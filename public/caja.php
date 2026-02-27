@@ -522,6 +522,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // Obtener el ID del pago recién insertado
       $payment_id = db()->lastInsertId();
 
+      // --- Generar Comprobante ---
+      db()->prepare("INSERT INTO payment_receipts (customer_id, order_id, payment_id, fecha, monto, concepto, notes, created_at)
+                     VALUES (?, ?, ?, NOW(), ?, ?, ?, NOW())")
+        ->execute([$customer_id, $order_id ?: null, $payment_id, $importe, 'Pago en Caja', 'Referencia: '.$referencia]);
+
       // Ledger ABONO
       $ss = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
                            FROM customer_ledger WHERE customer_id=?");
@@ -611,10 +616,10 @@ if ($pref_customer_id > 0) {
 // --------------------
 // Filtros P. Recientes
 // --------------------
-$desde = $_GET['desde'] ?? date('Y-m-d');
+$desde = $_GET['desde'] ?? date('Y-m-01'); // Default to start of month for recent
 $hasta = $_GET['hasta'] ?? date('Y-m-d');
 $f_customer = (int)($_GET['f_customer'] ?? 0);
-$orden_fecha = $_GET['orden_fecha'] ?? 'DESC'; // DESC = más recientes primero, ASC = más antiguos primero
+$orden_fecha = $_GET['orden_fecha'] ?? 'DESC'; 
 
 $wherePay = [];
 $paramsPay = [];
@@ -625,15 +630,15 @@ if ($f_customer > 0) {
   $wherePay[] = "p.customer_id = ?";
   $paramsPay[] = $f_customer;
 }
-$wherePaySql = 'WHERE ' . implode(' AND ', $wherePay);
+$wherePaySql = $wherePay ? ('WHERE ' . implode(' AND ', $wherePay)) : '';
 
-// Validar orden
-$orden_fecha = in_array($orden_fecha, ['ASC', 'DESC']) ? $orden_fecha : 'DESC';
-
-$sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, p.bank_account_id, p.third_party_name, p.voucher_path, c.nombre AS cliente, p.order_id, ba.nombre AS bank_name
+$sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, p.bank_account_id, 
+                   p.third_party_name, p.voucher_path, c.nombre AS cliente, p.order_id, 
+                   ba.nombre AS bank_name, pr.id AS receipt_id
             FROM payments p
             JOIN customers c ON c.id=p.customer_id
             LEFT JOIN bank_accounts ba ON ba.id=p.bank_account_id
+            LEFT JOIN payment_receipts pr ON pr.payment_id = p.id
             $wherePaySql
             ORDER BY p.fecha $orden_fecha, p.id $orden_fecha
             LIMIT 200";
@@ -755,9 +760,10 @@ $rep_total_gastos = 0;
 if ($tab === 'reportes') {
   // INGRESOS
   if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
-    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.voucher_path
+    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.voucher_path, pr.id AS receipt_id
               FROM payments p
               JOIN customers c ON c.id=p.customer_id
+              LEFT JOIN payment_receipts pr ON pr.payment_id = p.id
               WHERE DATE(p.fecha) BETWEEN ? AND ?
               ORDER BY p.fecha DESC";
     $stmtRI = db()->prepare($sqlRI);
@@ -1104,6 +1110,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
             <th>Tercero</th>
             <th>Comprobante</th>
             <th>Referencia</th>
+            <th>Recibo</th>
           </tr>
           </thead>
           <tbody>
@@ -1121,12 +1128,15 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
               <td><?= $p['third_party_name'] ? e($p['third_party_name']) : '-' ?></td>
               <td>
                 <?php if ($p['voucher_path']): ?>
-                  <a href="<?= url('voucher.php?file=' . urlencode($p['voucher_path'])) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
-                <?php else: ?>
-                  -
+                  <a href="<?= url('voucher.php?file=' . urlencode($p['voucher_path'])) ?>" target="_blank" class="btn btn-sm btn-outline-secondary">Ver</a>
                 <?php endif; ?>
               </td>
               <td><?= e($p['referencia']) ?></td>
+              <td>
+                <?php if ($p['receipt_id']): ?>
+                  <a href="<?= url('comprobante_pago.php?id=' . $p['receipt_id']) ?>" target="_blank" class="btn btn-sm btn-outline-primary" title="Imprimir Recibo">🖨️</a>
+                <?php endif; ?>
+              </td>
             </tr>
           <?php endforeach; endif; ?>
           </tbody>
@@ -1337,7 +1347,12 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                         <td style="white-space:nowrap;"><?= date('d/m/Y', strtotime($ri['fecha'])) ?></td>
                         <td>
                           <div class="fw-semibold"><?= e($ri['cliente']) ?></div>
-                          <small class="text-muted"><?= e($ri['medio']) ?> <?= $ri['referencia'] ? ' - '.e($ri['referencia']) : '' ?></small>
+                          <small class="text-muted">
+                            <?= e($ri['medio']) ?> <?= $ri['referencia'] ? ' - '.e($ri['referencia']) : '' ?>
+                            <?php if (!empty($ri['receipt_id'])): ?>
+                                <a href="comprobante_pago.php?id=<?= $ri['receipt_id'] ?>" target="_blank" class="text-decoration-none ms-2" title="Imprimir Comprobante">📄 Recibo</a>
+                            <?php endif; ?>
+                          </small>
                         </td>
                         <td class="text-end text-success fw-semibold"><?= money($ri['importe']) ?></td>
                       </tr>

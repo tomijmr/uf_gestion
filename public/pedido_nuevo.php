@@ -596,9 +596,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Seña opcional
         if ($senia > 0) {
-          db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, voucher_path, bank_account_id, third_party_name)
-                         VALUES (?,?,?,?,?,?,?,?,?)")
-            ->execute([$cid, $order_id, date('Y-m-d H:i:s'), $P['medio'], $senia, 'Seña', $P['voucher_path'], $P['bank_account_id'], $P['third_party_name'] ?: null]);
+          $stmtP = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, voucher_path, bank_account_id, third_party_name)
+                         VALUES (?,?,?,?,?,?,?,?,?)");
+          $stmtP->execute([$cid, $order_id, date('Y-m-d H:i:s'), $P['medio'], $senia, 'Seña', $P['voucher_path'], $P['bank_account_id'], $P['third_party_name'] ?: null]);
+          $payment_id = db()->lastInsertId();
+
+          // Generar Comprobante
+          db()->prepare("INSERT INTO payment_receipts (customer_id, order_id, payment_id, fecha, monto, concepto) VALUES (?, ?, ?, ?, ?, ?)")
+            ->execute([$cid, $order_id, $payment_id, date('Y-m-d H:i:s'), $senia, "Seña Pedido #$order_id"]);
+          $receipt_id = db()->lastInsertId();
+          // Fin Comprobante
 
           $saldoResult = $saldoResult - $senia;
           db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
@@ -608,7 +615,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         db()->commit();
         unset($_SESSION['pedido']);
-        header('Location: ' . url('pedido_nuevo.php') . '?step=3&ok=1&order_id=' . $order_id);
+        $recPar = isset($receipt_id) ? "&receipt_id=$receipt_id" : "";
+        header('Location: ' . url('pedido_nuevo.php') . '?step=3&ok=1&order_id=' . $order_id . $recPar);
         exit;
 
       } catch (Throwable $e) {
