@@ -197,7 +197,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     </div>
 
     <!-- Header y Filtros (Hidden on Print via CSS) -->
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3 no-print">
         <h2 class="mb-0 fw-bold text-primary"><i class="bi bi-bar-chart-line-fill"></i> Auditoría</h2>
         
         <div class="d-flex flex-column flex-sm-row gap-2 w-100 w-md-auto">
@@ -402,9 +402,9 @@ include __DIR__ . '/../views/partials/navbar.php';
                     <table class="table align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Producto</th>
-                                <th class="text-center">Cant.</th>
-                                <th class="text-end">Total Generado</th>
+                                <th style="width: 50%;">Producto</th>
+                                <th class="text-center" style="width: 25%;">Cant.</th>
+                                <th class="text-end" style="width: 25%;">Total Generado</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -469,9 +469,9 @@ include __DIR__ . '/../views/partials/navbar.php';
                         <table class="table table-striped table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Categoría</th>
-                                    <th class="text-end" style="width: 200px;">Monto Total</th>
-                                    <th class="text-end" style="width: 150px;">% del Total</th>
+                                    <th style="width: 60%;">Categoría</th>
+                                    <th class="text-end" style="width: 20%;">Monto Total</th>
+                                    <th class="text-end" style="width: 20%;">% del Total</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -506,15 +506,15 @@ include __DIR__ . '/../views/partials/navbar.php';
                      <span class="badge bg-light text-muted border">Caja y Bancos</span>
                 </div>
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0 text-nowrap">
+                    <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Fecha</th>
-                                <th>Tipo</th>
-                                <th>Categoría / Cliente / Prov.</th>
-                                <th>Detalle / Medio</th>
-                                <th class="text-end">Ingreso</th>
-                                <th class="text-end">Egreso</th>
+                                <th style="width: 12%;">Fecha</th>
+                                <th style="width: 12%;">Tipo</th>
+                                <th style="width: 28%;">Categoría / Cliente / Prov.</th>
+                                <th style="width: 28%;">Detalle / Medio</th>
+                                <th style="width: 10%; text-align: right;">Ingreso</th>
+                                <th style="width: 10%; text-align: right;">Egreso</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -602,7 +602,7 @@ include __DIR__ . '/../views/partials/navbar.php';
                                     $total_out += $m['out'];
                             ?>
                             <tr>
-                                <td class="text-muted small"><?= date('d/m/Y H:i', strtotime($m['fecha'])) ?></td>
+                                <td class="text-muted"><?= date('d/m/Y H:i', strtotime($m['fecha'])) ?></td>
                                 <td>
                                     <?php if ($m['in'] > 0): ?>
                                         <span class="badge bg-success bg-opacity-10 text-success border border-success">Ingreso</span>
@@ -610,8 +610,8 @@ include __DIR__ . '/../views/partials/navbar.php';
                                         <span class="badge bg-danger bg-opacity-10 text-danger border border-danger"><?= $m['tipo'] ?></span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?= e(substr($m['cat'], 0, 40)) ?></td>
-                                <td class="small text-muted"><?= e(substr($m['det'], 0, 50)) ?></td>
+                                <td><?= e($m['cat']) ?></td>
+                                <td><?= e($m['det']) ?></td>
                                 <td class="text-end fw-bold text-success"><?= $m['in'] > 0 ? money($m['in']) : '-' ?></td>
                                 <td class="text-end fw-bold text-danger"><?= $m['out'] > 0 ? money($m['out']) : '-' ?></td>
                             </tr>
@@ -639,26 +639,50 @@ include __DIR__ . '/../views/partials/navbar.php';
 @media print {
     @page {
         size: A4 landscape;
-        margin: 5mm;
+        margin: 8mm 10mm;
     }
     
-    body {
-        margin: 0;
-        padding: 0;
-        font-size: 12pt;
-        background-color: white !important;
+    * {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+        color-adjust: exact;
+    }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-size: 11pt;
+        line-height: 1.5;
+        background-color: white !important;
     }
 
     /* Hide non-essential UI */
-    nav, .navbar, header, footer, .btn, form, .no-print, .bi, button, a[href] { 
+    nav, .navbar, header, footer, .no-print { 
         display: none !important; 
     }
     
+    .btn, form, button, a[href] {
+        display: none !important;
+    }
+    
+    /* Hide bi icons */
+    .bi {
+        display: none !important;
+    }
+
     /* Remove shadows and borders that clutter print */
-    .shadow-sm { box-shadow: none !important; }
-    .card { border: 1px solid #ccc !important; break-inside: avoid; }
+    .shadow-sm { 
+        box-shadow: none !important; 
+    }
+    
+    .card { 
+        border: 1px solid #999 !important;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        margin-bottom: 4pt !important;
+    }
     
     /* Layout Adjustments */
     .container-fluid {
@@ -668,57 +692,285 @@ include __DIR__ . '/../views/partials/navbar.php';
         margin: 0 !important;
     }
 
-    /* Force Grid System to show columns side-by-side (Bootstrap Print Fix) */
+    /* Row and Column Fixes */
     .row {
         display: flex !important;
-        flex-wrap: nowrap !important;
+        flex-wrap: wrap !important;
+        width: 100%;
+        margin: 0 !important;
+        gap: 6pt !important;
     }
-    .col-md-3, .col-md-4, .col-md-6, .col-md-8 {
-        flex: 0 0 auto !important;
-    }
+
+    .col-12 { width: 100% !important; }
+    .col-md-2 { width: 16.666% !important; }
     .col-md-3 { width: 25% !important; }
     .col-md-4 { width: 33.333% !important; }
-    .col-md-6 { width: 50% !important; }
+    .col-md-6 { width: 49% !important; }
     .col-md-8 { width: 66.666% !important; }
+    .col-md-12 { width: 100% !important; }
     
-    /* Adjust specific sections */
+    .col {
+        flex: 1 1 auto;
+        max-width: 24%;
+        padding: 0 !important;
+    }
+    
+    .col > .card {
+        margin-bottom: 3pt !important;
+    }
+
+    .g-3 {
+        gap: 6pt !important;
+    }
+
+    .mb-4 { margin-bottom: 8pt !important; }
+    .mb-3 { margin-bottom: 6pt !important; }
+    .mb-0 { margin-bottom: 0 !important; }
+    .mx-auto { margin: 0 auto !important; }
+    .py-4 { padding-top: 4pt !important; padding-bottom: 4pt !important; }
+    .p-3 { padding: 6pt !important; }
+
+    /* Card Styles */
     .card-header {
-        background-color: #f8f9fa !important;
-        border-bottom: 1px solid #dee2e6 !important;
-        padding: 0.5rem !important;
+        background-color: #e8e8e8 !important;
+        border-bottom: 1px solid #999 !important;
+        padding: 4pt 6pt !important;
+        margin: 0 !important;
     }
-    .card-body { padding: 0.5rem !important; }
-    
-    /* Table optimizations */
-    .table-responsive { overflow: visible !important; }
-    table { width: 100% !important; font-size: 11pt; }
-    th, td { padding: 4px !important; }
-    
-    /* Charts */
-    canvas {
-        max-height: 200px !important;
-        width: 100% !important;
+
+    .card-header h6 {
+        font-size: 11pt;
+        margin: 0 !important;
+        font-weight: bold;
     }
-    
-    /* Header Report Title */
+
+    .card-body { 
+        padding: 6pt !important;
+        font-size: 11pt;
+    }
+
+    .card-body h3,
+    .card-body h4 {
+        font-size: 14pt;
+        margin: 3pt 0 !important;
+    }
+
+    .card-body .small {
+        font-size: 9pt;
+    }
+
+    /* Print Header */
     .print-header {
         display: block !important;
         text-align: center;
-        margin-bottom: 10px;
+        margin-bottom: 10pt;
         border-bottom: 2px solid #333;
-        padding-bottom: 5px;
+        padding-bottom: 6pt;
+        page-break-after: avoid;
     }
-    
-    /* Colors */
+
+    .print-header h3 {
+        font-size: 16pt;
+        margin: 0 0 3pt 0;
+        font-weight: bold;
+    }
+
+    .print-header p {
+        font-size: 11pt;
+        margin: 1pt 0;
+    }
+
+    /* Text positioning fixes */
+    .d-flex {
+        display: flex !important;
+    }
+
+    .justify-content-between {
+        justify-content: space-between !important;
+    }
+
+    .align-items-center {
+        align-items: center !important;
+    }
+
+    /* Table Optimizations */
+    .table-responsive { 
+        overflow: visible !important;
+        width: 100%;
+    }
+
+    table {
+        width: 100% !important;
+        font-size: 10pt;
+        border-collapse: collapse;
+        margin: 0;
+        page-break-inside: avoid;
+    }
+
+    table thead {
+        display: table-header-group;
+    }
+
+    table tbody tr {
+        page-break-inside: avoid;
+    }
+
+    th, td {
+        padding: 4pt 5pt !important;
+        border: 1px solid #ccc;
+        vertical-align: top;
+        line-height: 1.3;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        hyphens: auto;
+        white-space: normal !important;
+    }
+
+    th {
+        background-color: #f0f0f0 !important;
+        font-weight: bold;
+        font-size: 10pt;
+    }
+
+    /* Text utilities */
+    .text-center { text-align: center !important; }
+    .text-end { text-align: right !important; }
+    .text-start { text-align: left !important; }
+    .text-muted { color: #666 !important; font-size: 10pt; }
+    .fw-bold { font-weight: bold !important; }
+
+    /* Progress bars */
+    .progress {
+        height: 18pt !important;
+        font-size: 10pt;
+    }
+
+    .progress-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 11pt;
+    }
+
+    /* Badges and colors */
+    .badge {
+        padding: 2pt 3pt;
+        font-size: 9pt;
+        border-radius: 2px;
+        display: inline-block;
+        border: 1px solid !important;
+    }
+
     .bg-primary { background-color: #0d6efd !important; color: white !important; }
     .bg-success { background-color: #198754 !important; color: white !important; }
     .bg-danger { background-color: #dc3545 !important; color: white !important; }
+    .bg-warning { background-color: #ffc107 !important; color: #000 !important; }
+    .bg-light { background-color: #f8f9fa !important; }
+    .bg-opacity-10 { opacity: 1 !important; }
+    
+    .text-primary { color: #0d6efd !important; }
     .text-success { color: #198754 !important; }
     .text-danger { color: #dc3545 !important; }
+    .text-warning { color: #d39e00 !important; }
+    .text-white { color: white !important; }
+    .text-white-50 { color: rgba(255,255,255,0.7) !important; }
+
+    .border-0 { border: none !important; }
+    .border-start { border-left: 4px solid !important; }
+    .border-end { border-right: 1px solid #ccc !important; }
+    .border-top { border-top: 1px solid #ccc !important; }
+    .border-light { border-color: #ccc !important; }
+    .border-primary { border-color: #0d6efd !important; }
+    .border-success { border-color: #198754 !important; }
+    .border-danger { border-color: #dc3545 !important; }
+    .border-warning { border-color: #ffc107 !important; }
+
+    /* List group */
+    .list-group {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    .list-group-item {
+        padding: 6pt !important;
+        border: 1px solid #ddd !important;
+        font-size: 10pt;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .list-group-item.list-group-flush {
+        border-left: none !important;
+        border-right: none !important;
+    }
+
+    .list-group-item.bg-light {
+        background-color: #f0f0f0 !important;
+    }
+
+    /* Alert */
+    .alert {
+        padding: 6pt !important;
+        margin: 6pt 0 !important;
+        border: 1px solid #bbb !important;
+        font-size: 10pt;
+        border-radius: 3px;
+    }
+
+    .alert-info {
+        background-color: #d1ecf1 !important;
+        border-color: #bee5eb !important;
+        color: #0c5460 !important;
+    }
+
+    /* Charts */
+    canvas {
+        max-height: 180pt !important;
+        width: 100% !important;
+        page-break-inside: avoid;
+    }
+
+    /* Text nowrap fix - allow wrapping for print */
+    .text-nowrap {
+        white-space: normal !important;
+    }
+
+    /* Ensure text is readable */
+    h1 { font-size: 16pt; }
+    h2 { font-size: 14pt; }
+    h3 { font-size: 12pt; }
+    h4 { font-size: 11pt; }
+    h5 { font-size: 10pt; }
+    h6 { font-size: 10pt; }
+
+    .small { font-size: 9pt; }
+
+    /* MtD specific styling */
+    .mt-2 { margin-top: 4pt !important; }
+    .mt-1 { margin-top: 2pt !important; }
+    .pt-3 { padding-top: 4pt !important; }
+    .ps-4 { padding-left: 8pt !important; }
+
+    /* HR */
+    hr {
+        border: none;
+        border-top: 1px solid #ccc;
+        margin: 8pt 0;
+    }
 }
 
 /* Helper for Print Header (Hidden on Screen) */
 .print-header { display: none; }
+
+/* Hide elements on screen marked for print only */
+.no-print { display: inline; }
+
+@media screen {
+    .no-print { display: none; }
+}
 </style>
 
 

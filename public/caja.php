@@ -649,8 +649,6 @@ $pays = $stPays->fetchAll();
 // --------------------
 // Filtro de GASTOS
 // --------------------
-// Filtro de GASTOS
-// --------------------
 $g_desde    = $_GET['g_desde'] ?? date('Y-m-d');
 $g_hasta    = $_GET['g_hasta'] ?? date('Y-m-d');
 $g_categoria = $_GET['g_categoria'] ?? '';
