@@ -4,9 +4,11 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
-// ---------- Filtros de Fecha ----------
+// ---------- Filtros de Fecha y Categoría ----------
 $start_date = $_GET['start_date'] ?? date('Y-m-01');
 $end_date   = $_GET['end_date'] ?? date('Y-m-t');
+$filter_cat = trim($_GET['cat'] ?? '');
+
 
 // Calcular período anterior para comparar (mismo rango de días pero mes/año anterior o offset)
 $d1 = new DateTime($start_date);
@@ -21,7 +23,7 @@ $prev_end = $prev_end_dt->format('Y-m-d');
 $prev_start = (clone $prev_end_dt)->modify("-" . ($days - 1) . " days")->format('Y-m-d');
 
 // Helper para obtener datos de un rango
-function get_audit_data($start, $end) {
+function get_audit_data($start, $end, $filter_cat = '') {
     $db = db();
     $data = [
         'ventas' => 0,
@@ -32,6 +34,11 @@ function get_audit_data($start, $end) {
         'top_productos' => [],
         'timeline' => [] // [fecha => [ingreso, egreso]]
     ];
+    $cat_sql = '';
+    if ($filter_cat !== '') {
+        $cat_sql = ' AND categoria = ?';
+    }
+
 
     // 1. VENTAS (Orders confirmados/entregados/cerrados)
     // Excluir PRESUPUESTO, BORRADOR, CANCELADO
@@ -57,9 +64,12 @@ function get_audit_data($start, $end) {
     $data['compras'] = (float)($stmt->fetchColumn() ?? 0);
 
     // 3. GASTOS VARIOS (Expenses table)
-    $stmt = $db->prepare("SELECT SUM(importe) as total, categoria FROM expenses 
-                  WHERE fecha BETWEEN ? AND ? GROUP BY categoria");
-    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $sql = "SELECT SUM(importe) as total, categoria FROM expenses 
+                  WHERE fecha BETWEEN ? AND ?" . $cat_sql . " GROUP BY categoria";
+    $stmt = $db->prepare($sql);
+    $params = [$start . ' 00:00:00', $end . ' 23:59:59'];
+    if ($filter_cat !== '') $params[] = $filter_cat;
+    $stmt->execute($params);
     $rows = $stmt->fetchAll();
     foreach ($rows as $r) {
         $cat = $r['categoria'] ?: 'Sin Categoría';
@@ -69,9 +79,12 @@ function get_audit_data($start, $end) {
     }
 
     // 4. CAJA CHICA (Cash Expenses) - Asumimos que son gastos también
-    $stmt = $db->prepare("SELECT SUM(importe) as total, categoria FROM cash_expenses 
-                WHERE fecha BETWEEN ? AND ? GROUP BY categoria");
-    $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
+    $sql = "SELECT SUM(importe) as total, categoria FROM cash_expenses 
+                WHERE fecha BETWEEN ? AND ?" . $cat_sql . " GROUP BY categoria";
+    $stmt = $db->prepare($sql);
+    $params = [$start . ' 00:00:00', $end . ' 23:59:59'];
+    if ($filter_cat !== '') $params[] = $filter_cat;
+    $stmt->execute($params);
     $rows = $stmt->fetchAll();
     foreach ($rows as $r) {
         $cat = 'Caja: ' . ($r['categoria'] ?: 'Varios');
@@ -97,8 +110,8 @@ function get_audit_data($start, $end) {
     return $data;
 }
 
-$current = get_audit_data($start_date, $end_date);
-$prev    = get_audit_data($prev_start, $prev_end);
+$current = get_audit_data($start_date, $end_date, $filter_cat);
+$prev    = get_audit_data($prev_start, $prev_end, $filter_cat);
 
 // Variaciones
 function calc_diff($curr, $prev) {
@@ -207,6 +220,15 @@ include __DIR__ . '/../views/partials/navbar.php';
                     <input type="date" name="start_date" class="form-control form-control-sm" value="<?= $start_date ?>">
                     <span class="text-muted small fw-bold d-none d-sm-inline">Al:</span>
                     <input type="date" name="end_date" class="form-control form-control-sm" value="<?= $end_date ?>">
+                </div>
+                <div class="d-flex align-items-center gap-2 w-100">
+                    <span class="text-muted small fw-bold d-none d-sm-inline">Categoría:</span>
+                    <select name="cat" class="form-select form-select-sm">
+                        <option value="">Todas</option>
+                        <?php foreach(array_keys($current['gastos_categorias']) as $catopt): ?>
+                        <option value="<?= e($catopt) ?>" <?= $filter_cat === $catopt ? 'selected' : '' ?>><?= e($catopt) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div class="d-flex gap-2 w-100 w-sm-auto">
                     <button class="btn btn-primary btn-sm flex-fill">Actualizar</button>
