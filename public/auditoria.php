@@ -339,17 +339,17 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <div class="card-body d-flex flex-column justify-content-center">
                     <?php 
                         $total_egresos = $current['compras'] + $current['gastos'];
-                        $total_balance = $current['ventas'] + $total_egresos;
-                        $p_ingresos = $total_balance > 0 ? ($current['ventas'] / $total_balance) * 100 : 0;
+                        $total_balance = $current['cobros'] + $total_egresos;
+                        $p_ingresos = $total_balance > 0 ? ($current['cobros'] / $total_balance) * 100 : 0;
                         $p_egresos = $total_balance > 0 ? ($total_egresos / $total_balance) * 100 : 0;
                     ?>
                     <div class="mb-4">
                         <div class="d-flex justify-content-between mb-1">
-                            <span class="fw-bold text-success">Ingresos</span>
+                            <span class="fw-bold text-success">Ingresos (Real)</span>
                             <span class="fw-bold"><?= number_format($p_ingresos, 1) ?>%</span>
                         </div>
                         <div class="progress" style="height: 25px;">
-                            <div class="progress-bar bg-success" style="width: <?= $p_ingresos ?>%"><?= money($current['ventas']) ?></div>
+                            <div class="progress-bar bg-success" style="width: <?= $p_ingresos ?>%"><?= money($current['cobros']) ?></div>
                         </div>
                     </div>
                     
@@ -365,11 +365,11 @@ include __DIR__ . '/../views/partials/navbar.php';
 
                     <hr>
                     <div class="text-center">
-                        <small class="text-muted">Ratio de Eficiencia</small>
-                        <h4 class="mb-0 fw-bold <?= $current['ventas'] > $total_egresos ? 'text-primary' : 'text-warning' ?>">
-                            <?= $total_egresos > 0 ? number_format($current['ventas'] / $total_egresos, 2) : 'N/A' ?>x
+                        <small class="text-muted">Ratio de Eficiencia (Cash)</small>
+                        <h4 class="mb-0 fw-bold <?= $current['cobros'] > $total_egresos ? 'text-primary' : 'text-warning' ?>">
+                            <?= $total_egresos > 0 ? number_format($current['cobros'] / $total_egresos, 2) : 'N/A' ?>x
                         </h4>
-                        <small class="text-muted">Por cada $1 de egreso, ingresan $<?= $total_egresos > 0 ? number_format($current['ventas'] / $total_egresos, 2) : '0' ?></small>
+                        <small class="text-muted">Por cada $1 de egreso, cobraron $<?= $total_egresos > 0 ? number_format($current['cobros'] / $total_egresos, 2) : '0' ?></small>
                     </div>
                 </div>
             </div>
@@ -639,7 +639,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 @media print {
     @page {
         size: A4 landscape;
-        margin: 8mm 10mm;
+        margin: 12mm 15mm;
     }
     
     * {
@@ -650,10 +650,9 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     html, body {
         width: 100%;
-        height: 100%;
         margin: 0;
         padding: 0;
-        font-size: 11pt;
+        font-size: 12pt;
         line-height: 1.5;
         background-color: white !important;
     }
@@ -681,7 +680,7 @@ include __DIR__ . '/../views/partials/navbar.php';
         border: 1px solid #999 !important;
         break-inside: avoid;
         page-break-inside: avoid;
-        margin-bottom: 4pt !important;
+        margin-bottom: 8pt !important;
     }
     
     /* Layout Adjustments */
@@ -698,7 +697,7 @@ include __DIR__ . '/../views/partials/navbar.php';
         flex-wrap: wrap !important;
         width: 100%;
         margin: 0 !important;
-        gap: 6pt !important;
+        gap: 8pt !important;
     }
 
     .col-12 { width: 100% !important; }
@@ -713,6 +712,7 @@ include __DIR__ . '/../views/partials/navbar.php';
         flex: 1 1 auto;
         max-width: 24%;
         padding: 0 !important;
+        page-break-inside: avoid;
     }
     
     .col > .card {
@@ -720,64 +720,75 @@ include __DIR__ . '/../views/partials/navbar.php';
     }
 
     .g-3 {
-        gap: 6pt !important;
+        gap: 8pt !important;
     }
 
-    .mb-4 { margin-bottom: 8pt !important; }
-    .mb-3 { margin-bottom: 6pt !important; }
+    .mb-4 { margin-bottom: 10pt !important; }
+    .mb-3 { margin-bottom: 8pt !important; }
     .mb-0 { margin-bottom: 0 !important; }
     .mx-auto { margin: 0 auto !important; }
+    .mt-2 { margin-top: 6pt !important; }
+    .mt-1 { margin-top: 3pt !important; }
     .py-4 { padding-top: 4pt !important; padding-bottom: 4pt !important; }
     .p-3 { padding: 6pt !important; }
+    .pt-3 { padding-top: 6pt !important; }
+    .ps-4 { padding-left: 10pt !important; }
+
+    /* HR */
+    hr {
+        border: none;
+        border-top: 1px solid #ccc;
+        margin: 8pt 0;
+    }
 
     /* Card Styles */
     .card-header {
         background-color: #e8e8e8 !important;
         border-bottom: 1px solid #999 !important;
-        padding: 4pt 6pt !important;
+        padding: 6pt 8pt !important;
         margin: 0 !important;
     }
 
     .card-header h6 {
-        font-size: 11pt;
+        font-size: 12pt;
         margin: 0 !important;
         font-weight: bold;
     }
 
     .card-body { 
-        padding: 6pt !important;
-        font-size: 11pt;
+        padding: 8pt 10pt !important;
+        font-size: 12pt;
     }
 
     .card-body h3,
     .card-body h4 {
-        font-size: 14pt;
-        margin: 3pt 0 !important;
+        font-size: 15pt;
+        margin: 4pt 0 !important;
     }
 
     .card-body .small {
-        font-size: 9pt;
+        font-size: 10pt;
     }
 
     /* Print Header */
     .print-header {
         display: block !important;
         text-align: center;
-        margin-bottom: 10pt;
+        margin-bottom: 12pt;
         border-bottom: 2px solid #333;
-        padding-bottom: 6pt;
+        padding-bottom: 8pt;
         page-break-after: avoid;
     }
 
     .print-header h3 {
-        font-size: 16pt;
-        margin: 0 0 3pt 0;
+        font-size: 18pt;
+        margin: 0 0 4pt 0;
         font-weight: bold;
     }
 
     .print-header p {
-        font-size: 11pt;
-        margin: 1pt 0;
+        font-size: 12pt;
+        margin: 2pt 0;
     }
 
     /* Text positioning fixes */
@@ -801,10 +812,10 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     table {
         width: 100% !important;
-        font-size: 10pt;
+        font-size: 11pt;
         border-collapse: collapse;
         margin: 0;
-        page-break-inside: avoid;
+        page-break-inside: auto;
     }
 
     table thead {
@@ -813,13 +824,14 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     table tbody tr {
         page-break-inside: avoid;
+        page-break-after: auto;
     }
 
     th, td {
-        padding: 4pt 5pt !important;
+        padding: 6pt 8pt !important;
         border: 1px solid #ccc;
         vertical-align: top;
-        line-height: 1.3;
+        line-height: 1.4;
         word-wrap: break-word;
         overflow-wrap: break-word;
         hyphens: auto;
@@ -829,20 +841,20 @@ include __DIR__ . '/../views/partials/navbar.php';
     th {
         background-color: #f0f0f0 !important;
         font-weight: bold;
-        font-size: 10pt;
+        font-size: 11pt;
     }
 
     /* Text utilities */
     .text-center { text-align: center !important; }
     .text-end { text-align: right !important; }
     .text-start { text-align: left !important; }
-    .text-muted { color: #666 !important; font-size: 10pt; }
+    .text-muted { color: #666 !important; font-size: 11pt; }
     .fw-bold { font-weight: bold !important; }
 
     /* Progress bars */
     .progress {
-        height: 18pt !important;
-        font-size: 10pt;
+        height: 22pt !important;
+        font-size: 11pt;
     }
 
     .progress-bar {
@@ -856,9 +868,9 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     /* Badges and colors */
     .badge {
-        padding: 2pt 3pt;
-        font-size: 9pt;
-        border-radius: 2px;
+        padding: 3pt 5pt;
+        font-size: 10pt;
+        border-radius: 3px;
         display: inline-block;
         border: 1px solid !important;
     }
@@ -894,9 +906,9 @@ include __DIR__ . '/../views/partials/navbar.php';
     }
 
     .list-group-item {
-        padding: 6pt !important;
+        padding: 8pt 10pt !important;
         border: 1px solid #ddd !important;
-        font-size: 10pt;
+        font-size: 11pt;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -913,10 +925,10 @@ include __DIR__ . '/../views/partials/navbar.php';
 
     /* Alert */
     .alert {
-        padding: 6pt !important;
-        margin: 6pt 0 !important;
+        padding: 8pt 10pt !important;
+        margin: 8pt 0 !important;
         border: 1px solid #bbb !important;
-        font-size: 10pt;
+        font-size: 11pt;
         border-radius: 3px;
     }
 
@@ -939,27 +951,14 @@ include __DIR__ . '/../views/partials/navbar.php';
     }
 
     /* Ensure text is readable */
-    h1 { font-size: 16pt; }
-    h2 { font-size: 14pt; }
-    h3 { font-size: 12pt; }
-    h4 { font-size: 11pt; }
-    h5 { font-size: 10pt; }
-    h6 { font-size: 10pt; }
+    h1 { font-size: 18pt; }
+    h2 { font-size: 16pt; }
+    h3 { font-size: 14pt; }
+    h4 { font-size: 13pt; }
+    h5 { font-size: 12pt; }
+    h6 { font-size: 12pt; }
 
-    .small { font-size: 9pt; }
-
-    /* MtD specific styling */
-    .mt-2 { margin-top: 4pt !important; }
-    .mt-1 { margin-top: 2pt !important; }
-    .pt-3 { padding-top: 4pt !important; }
-    .ps-4 { padding-left: 8pt !important; }
-
-    /* HR */
-    hr {
-        border: none;
-        border-top: 1px solid #ccc;
-        margin: 8pt 0;
-    }
+    .small { font-size: 10pt; }
 }
 
 /* Helper for Print Header (Hidden on Screen) */
