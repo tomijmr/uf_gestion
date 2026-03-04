@@ -30,25 +30,19 @@ $empresa = require __DIR__ . '/../app/empresa.php';
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png">
   <style>
-    :root {
-      --bordo: #7b1e2e;
-      --bordo-soft: #a03a4a;
-      --negro: #181818;
-      --gris: #f4f4f4;
-    }
     @page { size: A4 portrait; margin: 25mm 18mm 25mm 18mm; }
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
       margin: 0;
-      background: var(--gris);
-      color: var(--negro);
+      background: #fff;
+      color: #181818;
       min-height: 100vh;
     }
     .header, .footer { text-align: center; }
     .header-logo { max-width: 110px; margin-bottom: 10px; }
     .remito-title {
       font-size: 2.2em;
-      color: var(--bordo);
+      color: #181818;
       margin-bottom: 0.2em;
       font-weight: 700;
       letter-spacing: 1px;
@@ -56,7 +50,7 @@ $empresa = require __DIR__ . '/../app/empresa.php';
     }
     .empresa-info {
       font-size: 1.08em;
-      color: var(--negro);
+      color: #181818;
       margin-bottom: 8px;
     }
     .remito-container {
@@ -66,8 +60,8 @@ $empresa = require __DIR__ . '/../app/empresa.php';
       border-radius: 10px;
       box-shadow: 0 2px 12px #0002;
       padding: 28px 38px 32px 38px;
-      border-left: 8px solid var(--bordo);
-      border-top: 3px solid var(--bordo-soft);
+      border-left: 8px solid #181818;
+      border-top: 3px solid #181818;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -86,10 +80,10 @@ $empresa = require __DIR__ . '/../app/empresa.php';
       text-align: left;
       padding-right: 10px;
       font-weight: 600;
-      color: var(--bordo);
+      color: #181818;
       font-size: 1.04em;
     }
-    .datos td { color: var(--negro); }
+    .datos td { color: #181818; }
     table.items {
       width: 100%;
       max-width: 700px;
@@ -102,51 +96,26 @@ $empresa = require __DIR__ . '/../app/empresa.php';
       font-size: 1.04em;
     }
     table.items th, table.items td {
-      border: 1.5px solid var(--bordo-soft);
+      border: 1.5px solid #181818;
       padding: 9px 7px;
     }
     table.items th {
-      background: var(--bordo);
+      background: #181818;
       color: #fff;
       font-weight: 700;
       letter-spacing: 0.5px;
       font-size: 1.05em;
     }
-    table.items td { color: var(--negro); }
-    .firma {
-      margin-top: 60px;
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-    }
-    .firma-box {
-      width: 48%;
-      text-align: center;
-      padding: 22px 0 0 0;
-      border-top: 2.5px solid var(--bordo);
-      border-radius: 0 0 8px 8px;
-      background: #fff0f3;
-      min-height: 80px;
-      font-size: 1.08em;
-    }
-    .firma-label {
-      font-size: 1.08em;
-      color: var(--bordo);
-      font-weight: 700;
-      margin-top: 10px;
-      display: block;
-      letter-spacing: 0.5px;
-    }
+    table.items td { color: #181818; }
     .footer {
       margin-top: 50px;
-      color: var(--bordo-soft);
+      color: #181818;
       font-size: 1em;
     }
     @media print {
       body { margin: 0; background: #fff; }
       .header-logo { max-width: 80px; }
       .datos, table.items { box-shadow: none !important; }
-      .firma { margin-top: 40px; }
       .footer { margin-top: 30px; }
     }
   </style>
@@ -189,16 +158,14 @@ $empresa = require __DIR__ . '/../app/empresa.php';
     <?php endforeach; ?>
   </tbody>
 </table>
-<div class="firma">
-  <div class="firma-box">
-    <div style="height: 32px;"></div>
-    <span class="firma-label">Firma y aclaración recibe transporte</span>
-  </div>
-  <div class="firma-box">
-    <div style="height: 32px;"></div>
-    <span class="firma-label">Firma y aclaración entrega Universal Fitness</span>
-  </div>
+
+<?php if (!empty($order['observaciones'])): ?>
+<div style="max-width:700px; margin:28px auto 0 auto; padding:18px 22px; background:#fff; border:2px solid #181818; border-radius:8px; font-size:1.08em; color:#181818;">
+  <strong>Notas del pedido:</strong><br>
+  <?= nl2br(e($order['observaciones'])) ?>
 </div>
+<?php endif; ?>
+
 <div class="footer">
   <hr>
   <small>Remito generado automáticamente - Universal Fitness</small>
