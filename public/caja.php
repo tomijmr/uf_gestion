@@ -1285,6 +1285,9 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
           <button class="btn btn-primary">Generar</button>
         </div>
         <div class="col-auto ms-auto d-flex gap-2">
+          <button type="button" class="btn btn-info" onclick="reporteGastosCategoria()">
+            <i class="bi bi-bar-chart-fill"></i> Gastos por Categoría
+          </button>
           <button type="button" class="btn btn-success" onclick="exportarCSV()">
             <i class="bi bi-file-earmark-spreadsheet"></i> Exportar CSV
           </button>
@@ -1295,6 +1298,22 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
       </form>
 
       <script>
+        function reporteGastosCategoria() {
+          const d = document.querySelector('input[name=rep_desde]').value;
+          const h = document.querySelector('input[name=rep_hasta]').value;
+          
+          // Mostrar menú de opciones
+          const choice = confirm('¿Qué deseas hacer?\n\nOK = Imprimir\nCancelar = Descargar CSV');
+          
+          if (choice) {
+            // Imprimir en A4
+            window.open(`export_gastos_categoria.php?start_date=${d}&end_date=${h}&print=1`, '_blank');
+          } else {
+            // Descargar como CSV
+            window.open(`export_gastos_categoria.php?start_date=${d}&end_date=${h}&export=csv`, '_blank');
+          }
+        }
+
         function exportarCSV() {
           const d = document.querySelector('input[name=rep_desde]').value;
           const h = document.querySelector('input[name=rep_hasta]').value;
