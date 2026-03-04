@@ -4,6 +4,9 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Helper para auditoría avanzada
+require_once __DIR__ . '/../app/helpers_auditoria.php';
+
 // ---------- Filtros de Fecha y Categoría ----------
 $start_date = $_GET['start_date'] ?? date('Y-m-01');
 $end_date   = $_GET['end_date'] ?? date('Y-m-t');
@@ -112,6 +115,9 @@ function get_audit_data($start, $end, $filter_cat = '') {
 
 $current = get_audit_data($start_date, $end_date, $filter_cat);
 $prev    = get_audit_data($prev_start, $prev_end, $filter_cat);
+
+// Totales de pedidos y pagos reales de esos pedidos
+list($total_pedidos, $total_pagado_pedidos, $detalle_pedidos) = get_real_income_by_orders($start_date, $end_date);
 
 // Variaciones
 function calc_diff($curr, $prev) {
@@ -251,7 +257,13 @@ include __DIR__ . '/../views/partials/navbar.php';
             <div class="card border-0 shadow-sm h-100 border-start border-4 border-primary">
                 <div class="card-body p-3">
                     <div class="text-muted small text-uppercase fw-bold mb-1">Ventas (Facturado)</div>
-                    <h3 class="fw-bold text-dark mb-0"><?= money($current['ventas']) ?></h3>
+                    <h3 class="fw-bold text-dark mb-0"><?= money($total_pedidos) ?></h3>
+                    <div class="small mt-2 text-muted">Total pedidos ingresados</div>
+                    <div class="fw-bold mt-2" style="font-size:1.1em;">
+                        <span class="text-success">Pagado: <?= money($total_pagado_pedidos) ?></span>
+                        <span class="text-muted">/</span>
+                        <span class="text-secondary">Total: <?= money($total_pedidos) ?></span>
+                    </div>
                     <div class="small mt-2 <?= $var_ventas >= 0 ? 'text-success' : 'text-danger' ?>">
                         <i class="bi bi-arrow-<?= $var_ventas >= 0 ? 'up' : 'down' ?>"></i> <?= number_format(abs($var_ventas), 1) ?>% vs periodo anterior
                     </div>
