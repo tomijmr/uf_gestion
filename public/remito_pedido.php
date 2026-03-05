@@ -133,17 +133,74 @@ $empresa = require __DIR__ . '/../app/empresa.php';
   </div>
   <hr style="width:100%; margin:18px 0 18px 0; border: none; border-top: 2px solid var(--bordo-soft);">
   <div class="datos">
-    <table style="width:100%;">
-      <tr><th>Cliente:</th><td><?= e($order['cliente_nombre']) ?></td></tr>
-      <tr><th>CUIT/DNI:</th><td><?= e($order['cuit_dni']) ?></td></tr>
-      <tr><th>Teléfono:</th><td><?= e($order['telefono']) ?></td></tr>
-      <tr><th>Dirección:</th><td><?= e($order['cliente_direccion']) ?></td></tr>
-      <tr><th>Pedido N°:</th><td><?= $order_id ?></td></tr>
-      <tr><th>Fecha Pedido:</th><td><?= date('d/m/Y', strtotime($order['fecha'])) ?></td></tr>
-      <tr><th>Fecha Entrega:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
-      <tr><th>Transporte:</th><td><?= e($order['empresa_transporte']) ?></td></tr>
-    </table>
+    <form id="remitoForm" style="width:100%;">
+      <table style="width:100%;">
+        <tr><th>Cliente:</th><td><?= e($order['cliente_nombre']) ?></td></tr>
+        <tr><th>CUIT/DNI:</th><td><?= e($order['cuit_dni']) ?></td></tr>
+        <tr><th>Teléfono:</th><td><?= e($order['telefono']) ?></td></tr>
+        <tr><th>Dirección:</th><td><?= e($order['cliente_direccion']) ?></td></tr>
+        <tr><th>Pedido N°:</th><td><?= $order_id ?></td></tr>
+        <tr><th>Fecha Pedido:</th><td><?= date('d/m/Y', strtotime($order['fecha'])) ?></td></tr>
+        <tr><th>Fecha Entrega:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
+        <tr><th>Transporte:</th><td><?= e($order['empresa_transporte']) ?></td></tr>
+        <tr>
+          <th>Cant. de Bultos:</th>
+          <td><input type="number" min="1" max="999" name="bultos" id="bultos" style="width:80px; font-size:1em; padding:2px 6px;" required></td>
+        </tr>
+        <tr>
+          <th>Tipo de Envío:</th>
+          <td>
+            <label><input type="radio" name="envio" value="Sucursal" required> Sucursal</label>
+            &nbsp;&nbsp;
+            <label><input type="radio" name="envio" value="Domicilio"> Domicilio</label>
+          </td>
+        </tr>
+      </table>
+    </form>
   </div>
+<script>
+// Mostrar los datos de bultos y tipo de envío en el remito al imprimir
+function beforePrint() {
+  var bultos = document.getElementById('bultos').value;
+  var envio = '';
+  var radios = document.getElementsByName('envio');
+  for (var i = 0; i < radios.length; i++) {
+    if (radios[i].checked) { envio = radios[i].value; break; }
+  }
+  // Mostrar los datos en el DOM si no existen
+  var datosTable = document.querySelector('.datos table');
+  if (!document.getElementById('rowBultos')) {
+    var rowBultos = datosTable.insertRow(-1);
+    rowBultos.id = 'rowBultos';
+    rowBultos.innerHTML = '<th>Cant. de Bultos:</th><td>' + (bultos ? bultos : '-') + '</td>';
+  } else {
+    datosTable.querySelector('#rowBultos td').textContent = bultos ? bultos : '-';
+  }
+  if (!document.getElementById('rowEnvio')) {
+    var rowEnvio = datosTable.insertRow(-1);
+    rowEnvio.id = 'rowEnvio';
+    rowEnvio.innerHTML = '<th>Tipo de Envío:</th><td>' + (envio ? envio : '-') + '</td>';
+  } else {
+    datosTable.querySelector('#rowEnvio td').textContent = envio ? envio : '-';
+  }
+  // Ocultar inputs
+  document.getElementById('bultos').style.display = 'none';
+  radios.forEach(function(r){ r.style.display = 'none'; });
+}
+
+function afterPrint() {
+  // Volver a mostrar los inputs
+  document.getElementById('bultos').style.display = '';
+  var radios = document.getElementsByName('envio');
+  radios.forEach(function(r){ r.style.display = ''; });
+}
+
+window.onbeforeprint = beforePrint;
+window.onafterprint = afterPrint;
+</script>
+<div style="text-align:right; margin: 18px 0 0 0;">
+  <button onclick="window.print()" style="font-size:1.1em; padding:7px 18px; background:#181818; color:#fff; border:none; border-radius:5px; cursor:pointer;">Imprimir Remito</button>
+</div>
 <table class="items">
   <thead>
     <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th></tr>
