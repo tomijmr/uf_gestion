@@ -66,6 +66,8 @@ if (!isset($_SESSION['pedido_edit'][$order_id]) || isset($_GET['reset'])) {
   ];
 }
 $P =& $_SESSION['pedido_edit'][$order_id];
+if (!isset($P['descuento_pct'])) $P['descuento_pct'] = 0;
+if (!isset($P['descuento_monto'])) $P['descuento_monto'] = 0;
 
 // ---------- Acciones POST ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -471,10 +473,27 @@ include __DIR__ . '/../views/partials/navbar.php';
               </tbody>
             </table>
           </div>
+          <form method="post" class="row g-2 mb-2">
+            <input type="hidden" name="action" value="set_discount">
+            <div class="col-4">
+              <label class="form-label mb-1">Descuento %</label>
+              <input class="form-control form-control-sm text-end" type="number" step="0.01" min="0" max="100" name="descuento_pct" value="<?= (float)$P['descuento_pct'] ?>">
+            </div>
+            <div class="col-4">
+              <label class="form-label mb-1">Descuento $</label>
+              <input class="form-control form-control-sm text-end" type="number" step="0.01" min="0" name="descuento_monto" value="<?= (float)$P['descuento_monto'] ?>">
+            </div>
+            <div class="col-4 d-flex align-items-end">
+              <button class="btn btn-outline-primary btn-sm w-100">Aplicar</button>
+            </div>
+          </form>
           <div class="d-flex justify-content-between align-items-center">
             <div class="text-muted">
                 <span class="me-3" title="Total Metros Cuadrados"><strong><?= number_format($total_m2, 0) ?></strong> m²</span>
-                <span>Total $: <strong><?= money(pedido_edit_total_bruto($items)) ?></strong></span>
+                <?php $total_bruto = pedido_edit_total_bruto($items); $descuento = round($total_bruto * $P['descuento_pct'] / 100, 2) + $P['descuento_monto']; $neto = max(0, $total_bruto - $descuento); ?>
+                <span>Total $: <strong><?= money($total_bruto) ?></strong></span>
+                <span>Descuento: <strong><?= money($descuento) ?></strong></span>
+                <span>Total Neto: <strong><?= money($neto) ?></strong></span>
             </div>
             <button class="btn btn-outline-primary btn-sm">Actualizar</button>
           </div>

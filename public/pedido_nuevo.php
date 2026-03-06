@@ -297,13 +297,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (empty($P['items'])) $error = 'El presupuesto no tiene ítems.';
 
+    // Descuento
+    $descuento_pct = isset($P['descuento_pct']) ? (float)$P['descuento_pct'] : 0;
+    $descuento_monto = isset($P['descuento_monto']) ? (float)$P['descuento_monto'] : 0;
+
     if (empty($error)) {
       try {
         db()->beginTransaction();
 
         $total_bruto = pedido_total_bruto($P['items']);
-        $descuento   = 0.0;
-        $total_neto  = $total_bruto - $descuento;
+        $descuento   = round($total_bruto * $descuento_pct / 100, 2) + $descuento_monto;
+        $total_neto  = max(0, $total_bruto - $descuento);
         $senia       = 0; // Presupuestos no suelen tener seña, o sí? Asumamos 0 por ahora o la que pongan. 
         $saldo       = max(0, $total_neto - $senia);
         $incluye_iva = $P['incluye_iva'] ?? 1;
@@ -921,8 +925,14 @@ if ($step === 3):
   }
 
   $total = !empty($P['items']) ? pedido_total_bruto($P['items']) : 0;
-  $descuento = 0; 
-  $neto = $total - $descuento;
+  if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'set_discount') {
+    $P['descuento_pct'] = isset($_POST['descuento_pct']) ? (float)$_POST['descuento_pct'] : 0;
+    $P['descuento_monto'] = isset($_POST['descuento_monto']) ? (float)$_POST['descuento_monto'] : 0;
+  }
+  $descuento_pct = isset($P['descuento_pct']) ? (float)$P['descuento_pct'] : 0;
+  $descuento_monto = isset($P['descuento_monto']) ? (float)$P['descuento_monto'] : 0;
+  $descuento = round($total * $descuento_pct / 100, 2) + $descuento_monto;
+  $neto = max(0, $total - $descuento);
   $senia = (float)($P['senia'] ?? 0); 
   $saldo = max(0, $neto - $senia);
   $items_view = $P['items'];
@@ -1011,6 +1021,20 @@ if ($step === 3):
               </table>
             </div>
 
+            <form method="post" class="row g-2 mb-2">
+              <input type="hidden" name="action" value="set_discount">
+              <div class="col-4">
+                <label class="form-label mb-1">Descuento %</label>
+                <input class="form-control form-control-sm text-end" type="number" step="0.01" min="0" max="100" name="descuento_pct" value="<?= (float)$descuento_pct ?>">
+              </div>
+              <div class="col-4">
+                <label class="form-label mb-1">Descuento $</label>
+                <input class="form-control form-control-sm text-end" type="number" step="0.01" min="0" name="descuento_monto" value="<?= (float)$descuento_monto ?>">
+              </div>
+              <div class="col-4 d-flex align-items-end">
+                <button class="btn btn-outline-primary btn-sm w-100">Aplicar</button>
+              </div>
+            </form>
             <div class="d-flex justify-content-end">
               <div class="text-end">
                 <div>Subtotal: <strong><?= money($total) ?></strong></div>

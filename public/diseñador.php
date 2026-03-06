@@ -15,7 +15,7 @@ include __DIR__ . '/../views/partials/navbar.php';
   <style>
     body { background: #222; color: #fff; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; }
     .designer-container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    h1 { text-align: center; margin-bottom: 18px; }
+    h1 { text-align: center; margin-bottom: 18px; color: #111 !important; }
     .controls { background: #181818; padding: 16px; border-radius: 8px; margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: center; }
     .controls label { margin-right: 8px; }
     #gym-canvas { background: #444; display: block; margin: 0 auto; border-radius: 8px; box-shadow: 0 2px 12px #0008; }
@@ -26,6 +26,13 @@ include __DIR__ . '/../views/partials/navbar.php';
   </style>
 </head>
 <body>
+<script>
+// Forzar fondo y color de texto oscuros en el body, sobrescribiendo Bootstrap
+document.addEventListener('DOMContentLoaded', function() {
+  document.body.style.background = '#222';
+  document.body.style.color = '#fff';
+});
+</script>
 <div class="designer-container">
   <h1>Diseñador de Gimnasio</h1>
   <div class="controls">
@@ -144,7 +151,7 @@ function renderMachineList() {
     // Usar el campo correcto de la BD
     el.textContent = (m.nombre || m.name) + ' ('+(m.metros_cuadrados || m.m2)+' m²)';
     el.style.borderColor = m.color;
-    el.style.background = m.color+'22';
+    el.style.background = m.color;
     el.onclick = ()=>{
       // Al hacer click, agregar al plano
       let px = m2ToPx(1);
@@ -202,4 +209,32 @@ renderMachineList();
 drawGym();
 </script>
 </body>
-</html>
+  <style>
+    html, body, .designer-container, .controls, .legend, h1, label, input, button, .machine-item, .navbar, .navbar * {
+      color: #fff !important;
+      background: transparent;
+      border-color: #fff !important;
+    }
+    body {
+      background: #222 !important;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+    }
+    .designer-container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h1 { text-align: center; margin-bottom: 18px; }
+    .controls { background: #181818; padding: 16px; border-radius: 8px; margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: center; }
+    .controls label { margin-right: 8px; }
+    #gym-canvas { background: #444; display: block; margin: 0 auto; border-radius: 8px; box-shadow: 0 2px 12px #0008; }
+    .machine-list { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+    .machine-item { background: #333; border: 2px solid #666; border-radius: 6px; padding: 8px 12px; cursor: grab; color: #fff !important; font-size: 1em; }
+    .machine-item.selected, .machine-item:hover { border-color: #ffb300; background: #222; }
+    .legend { margin-top: 18px; text-align: center; color: #bbb !important; font-size: 0.98em; }
+    input, button {
+      background: #222 !important;
+      color: #fff !important;
+      border: 1px solid #fff !important;
+    }
+    .navbar, .navbar * {
+      color: #fff !important;
+    }
+  </style>
