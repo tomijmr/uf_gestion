@@ -77,87 +77,79 @@ if (isset($remito_numero) && !$remito_guardado) {
       background: #fff;
       color: #181818;
       min-height: 100vh;
-      font-size: 1.25em;
+      font-size: 1.5em;
+      text-align: justify;
+      text-justify: inter-word;
     }
     .header, .footer { text-align: center; }
-    .header-logo { max-width: 110px; margin-bottom: 10px; }
+    .header-logo { display: none !important; }
     .remito-title {
-      font-size: 2.2em;
-      color: #181818;
-      margin-bottom: 0.2em;
-      font-weight: 700;
-      letter-spacing: 1px;
+      font-size: 2em;
+      font-weight: bold;
+      margin: 0 0 8px 0;
       text-transform: uppercase;
-    }
-    .empresa-info {
-      font-size: 1.08em;
       color: #181818;
-      margin-bottom: 8px;
+      text-align: center;
+    }
+    .empresa-info, .footer {
+      font-size: 1em;
+      margin: 0 0 4px 0;
+      color: #181818;
+      text-align: center;
+    }
+    .remito-container, .datos, .footer {
+      background: #fff !important;
+      color: #181818 !important;
+      max-width: 700px;
+      margin: 0 auto 8px auto !important;
+      padding: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
     }
     .remito-container {
-      margin: 28px auto 22px auto;
-      max-width: 950px;
-      background: #fff;
-      border-radius: 10px;
-      box-shadow: 0 2px 12px #0002;
-      padding: 28px 38px 32px 38px;
-      border-left: 8px solid #181818;
-      border-top: 3px solid #181818;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      border: none !important;
+      padding: 0 0 0 0 !important;
     }
-    .datos {
-      width: 100%;
-      max-width: 700px;
-      margin: 0 auto 18px auto;
-      background: none;
-      border-radius: 0;
-      box-shadow: none;
-      padding: 0;
-      border: none;
-    }
-    .datos th {
-      text-align: left;
-      padding-right: 10px;
-      font-weight: 600;
+    .datos th, .datos td {
+      font-size: 1em;
+      padding: 2px 6px 2px 0;
       color: #181818;
-      font-size: 1.04em;
     }
-    .datos td { color: #181818; }
     table.items {
-      width: 100%;
-      max-width: 700px;
-      margin: 18px auto 0 auto;
+      font-size: 1em;
+      margin: 8px 0 0 0;
       border-collapse: collapse;
       background: #fff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 12px #0002;
-      font-size: 1.04em;
-    }
-    table.items th, table.items td {
-      border: 1.5px solid #181818;
-      padding: 9px 7px;
+      color: #181818;
+      width: 100%;
     }
     table.items th {
       background: #181818;
       color: #fff;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      font-size: 1.05em;
+      font-weight: bold;
+      border: 1.5px solid #181818;
+      padding: 8px 6px;
     }
-    table.items td { color: #181818; }
-    .footer {
-      margin-top: 50px;
+    table.items td {
+      border: 1.5px solid #181818;
+      padding: 8px 6px;
       color: #181818;
-      font-size: 1em;
+      background: #fff;
     }
+    hr { display: none; }
     @media print {
-      body { margin: 0; background: #fff; }
-      .header-logo { max-width: 80px; }
-      .datos, table.items { box-shadow: none !important; }
-      .footer { margin-top: 30px; }
+      body, .remito-container, .datos, .footer {
+        background: #fff !important;
+        color: #181818 !important;
+      }
+      table.items th {
+        background: #181818 !important;
+        color: #fff !important;
+      }
+      table.items td {
+        background: #fff !important;
+        color: #181818 !important;
+      }
     }
   </style>
 </head>
