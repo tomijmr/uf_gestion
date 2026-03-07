@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
@@ -78,6 +77,7 @@ if (isset($remito_numero) && !$remito_guardado) {
       background: #fff;
       color: #181818;
       min-height: 100vh;
+      font-size: 1.25em;
     }
     .header, .footer { text-align: center; }
     .header-logo { max-width: 110px; margin-bottom: 10px; }
