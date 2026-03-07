@@ -17,7 +17,9 @@ if (!function_exists('can')) {
 
 /** Definición de menú por roles (fácil de ajustar) */
 // Agregado: acceso directo al diseñador
+// Agregado: Remitos como menú principal
 $MENU = [
+  ['label' => 'Remitos', 'href' => url('remitos.php'), 'roles' => ['*']],
   ['label' => 'Dashboard', 'href' => url('dashboard.php'), 'roles' => ['*']],
   ['label' => 'Diseñador', 'href' => url('diseñador.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH','LECTURA','CAJA','VENTAS']],
   

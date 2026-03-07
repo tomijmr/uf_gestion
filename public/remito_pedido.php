@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
@@ -22,6 +23,46 @@ $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Datos empresa
 $empresa = require __DIR__ . '/../app/empresa.php';
 
+// Generar número de remito autoincremental simple (por día)
+$remito_fecha = date('Ymd');
+$remito_counter_file = sys_get_temp_dir() . '/remito_counter_' . $remito_fecha . '.txt';
+if (file_exists($remito_counter_file)) {
+  $remito_num = (int)file_get_contents($remito_counter_file) + 1;
+} else {
+  $remito_num = 1;
+}
+file_put_contents($remito_counter_file, $remito_num);
+$remito_numero = $remito_fecha . '-' . str_pad($remito_num, 3, '0', STR_PAD_LEFT);
+
+// Guardar remito en la base de datos si no existe ya para este número
+$remito_guardado = false;
+if (isset($remito_numero) && !$remito_guardado) {
+  $existe = db()->prepare("SELECT id FROM remitos WHERE numero=?");
+  $existe->execute([$remito_numero]);
+  if (!$existe->fetch()) {
+    // Tomar datos del pedido y del remito
+    $sql = "INSERT INTO remitos (numero, fecha, order_id, cliente_nombre, cuit_dni, telefono, direccion, fecha_pedido, fecha_pactada, transporte, bultos, tipo_envio, nombre_sucursal, direccion_sucursal, observaciones) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    $stmt = db()->prepare($sql);
+    $stmt->execute([
+      $remito_numero,
+      date('Y-m-d'),
+      $order_id,
+      $order['cliente_nombre'] ?? 'SIN NOMBRE',
+      $order['cuit_dni'] ?? '',
+      $order['telefono'] ?? '',
+      $order['cliente_direccion'] ?? '',
+      $order['fecha'] ?? null,
+      $order['fecha_entrega'] ?? null,
+      $order['empresa_transporte'] ?? null,
+      null, // bultos (se puede actualizar luego)
+      null, // tipo_envio (se puede actualizar luego)
+      null, // nombre_sucursal (se puede actualizar luego)
+      null, // direccion_sucursal (se puede actualizar luego)
+      $order['observaciones'] ?? null
+    ]);
+    $remito_guardado = true;
+  }
+}
 ?><!doctype html>
 <html lang="es">
 <head>
@@ -125,6 +166,7 @@ $empresa = require __DIR__ . '/../app/empresa.php';
   <div class="header">
     <img src="favicon.svg" alt="Logo" class="header-logo">
     <div class="remito-title">Remito de Despacho</div>
+    <div style="font-size:1.2em; font-weight:600; margin-bottom:6px;">N° Remito: <?= $remito_numero ?> &nbsp; | &nbsp; Fecha: <?= date('d/m/Y') ?></div>
     <div class="empresa-info">
       <strong><?= e($empresa['nombre']) ?></strong><br>
       <?= e($empresa['direccion']) ?> | CUIT: <?= e($empresa['cuit']) ?><br>
@@ -141,8 +183,11 @@ $empresa = require __DIR__ . '/../app/empresa.php';
         <tr><th>Dirección:</th><td><?= e($order['cliente_direccion']) ?></td></tr>
         <tr><th>Pedido N°:</th><td><?= $order_id ?></td></tr>
         <tr><th>Fecha Pedido:</th><td><?= date('d/m/Y', strtotime($order['fecha'])) ?></td></tr>
-        <tr><th>Fecha Entrega:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
-        <tr><th>Transporte:</th><td><?= e($order['empresa_transporte']) ?></td></tr>
+        <tr><th>Fecha Pactada:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
+        <tr>
+          <th>Transporte:</th>
+          <td><input type="text" name="transporte" id="transporte" value="<?= e($order['empresa_transporte'] ?? '') ?>" style="width:220px; font-size:1em; padding:2px 6px;" placeholder="Transporte"></td>
+        </tr>
         <tr>
           <th>Cant. de Bultos:</th>
           <td><input type="number" min="1" max="999" name="bultos" id="bultos" style="width:80px; font-size:1em; padding:2px 6px;" required></td>
@@ -243,6 +288,30 @@ window.onafterprint = afterPrint;
 window.addEventListener('DOMContentLoaded', function() {
   toggleSucursalFields();
 });
+function guardarDatosRemito() {
+  var bultos = document.getElementById('bultos').value;
+  var envio = '';
+  var radios = document.getElementsByName('envio');
+  for (var i = 0; i < radios.length; i++) {
+    if (radios[i].checked) { envio = radios[i].value; break; }
+  }
+  var nombreSucursal = document.getElementById('nombre_sucursal').value;
+  var direccionSucursal = document.getElementById('direccion_sucursal').value;
+  var transporte = document.getElementById('transporte').value;
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', 'remito_update.php', true);
+  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+  xhr.send('numero=<?= $remito_numero ?>'
+    + '&bultos=' + encodeURIComponent(bultos)
+    + '&tipo_envio=' + encodeURIComponent(envio)
+    + '&nombre_sucursal=' + encodeURIComponent(nombreSucursal)
+    + '&direccion_sucursal=' + encodeURIComponent(direccionSucursal)
+    + '&transporte=' + encodeURIComponent(transporte));
+}
+
+document.getElementById('remitoForm').addEventListener('change', guardarDatosRemito);
+window.onbeforeprint = function() { beforePrint(); guardarDatosRemito(); };
+window.onafterprint = afterPrint;
 </script>
 <div style="text-align:right; margin: 18px 0 0 0;">
   <button onclick="window.print()" style="font-size:1.1em; padding:7px 18px; background:#181818; color:#fff; border:none; border-radius:5px; cursor:pointer;">Imprimir Remito</button>
