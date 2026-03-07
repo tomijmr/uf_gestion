@@ -150,16 +150,37 @@ $empresa = require __DIR__ . '/../app/empresa.php';
         <tr>
           <th>Tipo de Envío:</th>
           <td>
-            <label><input type="radio" name="envio" value="Sucursal" required> Sucursal</label>
+            <label><input type="radio" name="envio" value="Sucursal" required onchange="toggleSucursalFields()"> Sucursal</label>
             &nbsp;&nbsp;
-            <label><input type="radio" name="envio" value="Domicilio"> Domicilio</label>
+            <label><input type="radio" name="envio" value="Domicilio" onchange="toggleSucursalFields()"> Domicilio</label>
           </td>
+        </tr>
+        <tr id="sucursalFields" style="display:none;">
+          <th>Nombre Sucursal:</th>
+          <td><input type="text" name="nombre_sucursal" id="nombre_sucursal" style="width:220px; font-size:1em; padding:2px 6px;" placeholder="Nombre de la sucursal"></td>
+        </tr>
+        <tr id="sucursalDireccionFields" style="display:none;">
+          <th>Dirección Sucursal:</th>
+          <td><input type="text" name="direccion_sucursal" id="direccion_sucursal" style="width:320px; font-size:1em; padding:2px 6px;" placeholder="Dirección de la sucursal"></td>
         </tr>
       </table>
     </form>
   </div>
 <script>
-// Mostrar los datos de bultos y tipo de envío en el remito al imprimir
+function toggleSucursalFields() {
+  var radios = document.getElementsByName('envio');
+  var show = false;
+  for (var i = 0; i < radios.length; i++) {
+    if (radios[i].checked && radios[i].value === 'Sucursal') {
+      show = true;
+      break;
+    }
+  }
+  document.getElementById('sucursalFields').style.display = show ? '' : 'none';
+  document.getElementById('sucursalDireccionFields').style.display = show ? '' : 'none';
+}
+
+// Mostrar los datos de bultos, tipo de envío y sucursal en el remito al imprimir
 function beforePrint() {
   var bultos = document.getElementById('bultos').value;
   var envio = '';
@@ -167,7 +188,8 @@ function beforePrint() {
   for (var i = 0; i < radios.length; i++) {
     if (radios[i].checked) { envio = radios[i].value; break; }
   }
-  // Mostrar los datos en el DOM si no existen
+  var nombreSucursal = document.getElementById('nombre_sucursal').value;
+  var direccionSucursal = document.getElementById('direccion_sucursal').value;
   var datosTable = document.querySelector('.datos table');
   if (!document.getElementById('rowBultos')) {
     var rowBultos = datosTable.insertRow(-1);
@@ -183,9 +205,26 @@ function beforePrint() {
   } else {
     datosTable.querySelector('#rowEnvio td').textContent = envio ? envio : '-';
   }
+  // Sucursal fields
+  if (!document.getElementById('rowSucursalNombre')) {
+    var rowSucursalNombre = datosTable.insertRow(-1);
+    rowSucursalNombre.id = 'rowSucursalNombre';
+    rowSucursalNombre.innerHTML = '<th>Nombre Sucursal:</th><td>' + (envio === 'Sucursal' && nombreSucursal ? nombreSucursal : '-') + '</td>';
+  } else {
+    datosTable.querySelector('#rowSucursalNombre td').textContent = (envio === 'Sucursal' && nombreSucursal ? nombreSucursal : '-');
+  }
+  if (!document.getElementById('rowSucursalDireccion')) {
+    var rowSucursalDireccion = datosTable.insertRow(-1);
+    rowSucursalDireccion.id = 'rowSucursalDireccion';
+    rowSucursalDireccion.innerHTML = '<th>Dirección Sucursal:</th><td>' + (envio === 'Sucursal' && direccionSucursal ? direccionSucursal : '-') + '</td>';
+  } else {
+    datosTable.querySelector('#rowSucursalDireccion td').textContent = (envio === 'Sucursal' && direccionSucursal ? direccionSucursal : '-');
+  }
   // Ocultar inputs
   document.getElementById('bultos').style.display = 'none';
   radios.forEach(function(r){ r.style.display = 'none'; });
+  document.getElementById('nombre_sucursal').style.display = 'none';
+  document.getElementById('direccion_sucursal').style.display = 'none';
 }
 
 function afterPrint() {
@@ -193,10 +232,17 @@ function afterPrint() {
   document.getElementById('bultos').style.display = '';
   var radios = document.getElementsByName('envio');
   radios.forEach(function(r){ r.style.display = ''; });
+  document.getElementById('nombre_sucursal').style.display = '';
+  document.getElementById('direccion_sucursal').style.display = '';
 }
 
 window.onbeforeprint = beforePrint;
 window.onafterprint = afterPrint;
+
+// Inicializar visibilidad al cargar
+window.addEventListener('DOMContentLoaded', function() {
+  toggleSucursalFields();
+});
 </script>
 <div style="text-align:right; margin: 18px 0 0 0;">
   <button onclick="window.print()" style="font-size:1.1em; padding:7px 18px; background:#181818; color:#fff; border:none; border-radius:5px; cursor:pointer;">Imprimir Remito</button>
