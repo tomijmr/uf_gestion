@@ -77,8 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$proveedor) throw new Exception('Proveedor no encontrado.');
 
     $insP = db()->prepare("INSERT INTO purchases
-      (fecha, proveedor, comp_tipo, comp_serie, comp_numero, total, moneda, archivo_path, notas, created_by, incluye_iva)
-      VALUES (?,?,?,?,?,0,?,?,?,?,?)");
+      (fecha, proveedor, comp_tipo, comp_serie, comp_numero, total, moneda, archivo_path, notas, created_by, incluye_iva, estado, pago_id)
+      VALUES (?,?,?,?,?,0,?,?,?,?,?,'PENDIENTE',NULL)");
     $insP->execute([$fecha, $proveedor['nombre'], $comp_tipo, $comp_serie, $comp_num, $moneda, $archivo_path, $notas, (int)user()['id'], $incluye_iva]);
     $purchase_id = (int)db()->lastInsertId();
 

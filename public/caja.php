@@ -155,22 +155,22 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
 
               UNION ALL
 
-              SELECT p.fecha, 
-                     CAST('COMPRA' AS CHAR) as categoria, 
-                     CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR) as descripcion,
-                     CAST('COMPRA' AS CHAR) as medio, 
-                     p.total as importe, 
-                     CAST(u.nombre AS CHAR) as usuario
+              SELECT p.id, p.fecha, 'COMPRA' as categoria,
+                CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) as descripcion,
+                'COMPRA' as medio,
+                p.total as importe,
+                u.nombre AS usuario
               FROM purchases p
               LEFT JOIN users u ON u.id = p.created_by
               WHERE DATE(p.fecha) BETWEEN ? AND ?
+                AND p.estado = 'CONSOLIDADA'
 
-              ORDER BY fecha DESC";
-              
-    $stmtRG = db()->prepare($sqlRG);
-    // Bindparams se duplican por el UNION
-    $stmtRG->execute([$rep_desde, $rep_hasta, $rep_desde, $rep_hasta]);
-    $rep_gastos = $stmtRG->fetchAll();
+              ORDER BY fecha $g_orden_fecha, id $g_orden_fecha
+              LIMIT 200";
+    $paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta]);
+    $stG = db()->prepare($sqlG);
+    $stG->execute($paramsG2);
+    $gastos = $stG->fetchAll();
     foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
   }
 
@@ -670,14 +670,36 @@ $whereGSql = 'WHERE ' . implode(' AND ', $whereG);
 // Validar orden
 $g_orden_fecha = in_array($g_orden_fecha, ['ASC', 'DESC']) ? $g_orden_fecha : 'DESC';
 
-$sqlG = "SELECT e.id, e.fecha, e.categoria, e.descripcion, e.medio, e.importe, u.nombre AS usuario
-         FROM cash_expenses e
-         LEFT JOIN users u ON u.id = e.created_by
-         $whereGSql
-         ORDER BY e.fecha $g_orden_fecha, e.id $g_orden_fecha
-         LIMIT 200";
+
+// UNION cash_expenses + compras consolidadas
+$sqlG = "SELECT e.id, e.fecha,
+                CAST(e.categoria AS CHAR) as categoria,
+                CAST(e.descripcion AS CHAR) as descripcion,
+                CAST(e.medio AS CHAR) as medio,
+                e.importe,
+                CAST(u.nombre AS CHAR) AS usuario
+           FROM cash_expenses e
+           LEFT JOIN users u ON u.id = e.created_by
+           $whereGSql
+
+           UNION ALL
+
+           SELECT p.id, p.fecha,
+                'COMPRA' as categoria,
+                CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR) as descripcion,
+                'COMPRA' as medio,
+                p.total as importe,
+                CAST(u.nombre AS CHAR) AS usuario
+           FROM purchases p
+           LEFT JOIN users u ON u.id = p.created_by
+           WHERE DATE(p.fecha) BETWEEN ? AND ?
+             AND p.estado = 'CONSOLIDADA'
+
+           ORDER BY fecha $g_orden_fecha, id $g_orden_fecha
+           LIMIT 200";
+$paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta]);
 $stG = db()->prepare($sqlG);
-$stG->execute($paramsG);
+$stG->execute($paramsG2);
 $gastos = $stG->fetchAll();
 
 // ---------------------
@@ -788,26 +810,23 @@ if ($tab === 'reportes') {
 
               UNION ALL
 
-              SELECT p.fecha, 
-                     CAST('COMPRA' AS CHAR) as categoria, 
-                     CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR) as descripción,
-                     CAST('COMPRA' AS CHAR) as medio, 
-                     p.total as importe, 
-                     CAST(u.nombre AS CHAR) as usuario
+              SELECT p.id, p.fecha, 'COMPRA' as categoria,
+                CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) as descripcion,
+                'COMPRA' as medio,
+                p.total as importe,
+                u.nombre AS usuario
               FROM purchases p
               LEFT JOIN users u ON u.id = p.created_by
               WHERE DATE(p.fecha) BETWEEN ? AND ?
+                AND p.estado = 'CONSOLIDADA'
 
-              ORDER BY fecha DESC";
-
-    $stmtRG = db()->prepare($sqlRG);
-    // Bindparams se duplican por el UNION
-    $stmtRG->execute([$rep_desde, $rep_hasta, $rep_desde, $rep_hasta]);
-    $rep_gastos = $stmtRG->fetchAll();
-
-    foreach ($rep_gastos as $r) {
-      $rep_total_gastos += (float)$r['importe'];
-    }
+              ORDER BY fecha $g_orden_fecha, id $g_orden_fecha
+              LIMIT 200";
+    $paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta]);
+    $stG = db()->prepare($sqlG);
+    $stG->execute($paramsG2);
+    $rep_gastos = $stG->fetchAll();
+    foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
   }
 }
 
@@ -1352,7 +1371,7 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                     <thead class="table-light sticky-top">
                       <tr>
                         <th>Fecha</th>
-                        <th>Cliente / Detalle</th> <!-- Combiné para ahorrar espacio -->
+                        <th>Cliente / Detalle</th>
                         <th class="text-end">Importe</th>
                       </tr>
                     </thead>

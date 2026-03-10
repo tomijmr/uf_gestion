@@ -61,7 +61,7 @@ function get_audit_data($start, $end, $filter_cat = '') {
 
     // 2. COMPRAS (Purchases - Materia Prima)
     $sqlCompras = "SELECT SUM(total) as total FROM purchases 
-                   WHERE fecha BETWEEN ? AND ?";
+                   WHERE fecha BETWEEN ? AND ? AND estado = 'CONSOLIDADA'";
     $stmt = $db->prepare($sqlCompras);
     $stmt->execute([$start . ' 00:00:00', $end . ' 23:59:59']);
     $data['compras'] = (float)($stmt->fetchColumn() ?? 0);
