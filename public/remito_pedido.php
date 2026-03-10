@@ -72,14 +72,14 @@ if (isset($remito_numero) && !$remito_guardado) {
   <style>
     @page { size: A4 portrait; margin: 25mm 18mm 25mm 18mm; }
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
+      font-family: 'Courier New', Courier, monospace !important;
+      font-size: 12px !important;
+      line-height: 1.0 !important;
       margin: 0;
       background: #fff;
       color: #181818;
       min-height: 100vh;
-      font-size: 1.5em;
-      text-align: justify;
-      text-justify: inter-word;
+      text-align: left;
     }
     .header, .footer { text-align: center; }
     .header-logo { display: none !important; }
@@ -98,43 +98,27 @@ if (isset($remito_numero) && !$remito_guardado) {
       text-align: center;
     }
     .remito-container, .datos, .footer {
-      background: #fff !important;
-      color: #181818 !important;
-      max-width: 700px;
+      width: 550px !important;
+      max-width: 550px !important;
+      overflow: hidden !important;
       margin: 0 auto 8px auto !important;
       padding: 0 !important;
       border-radius: 0 !important;
       box-shadow: none !important;
+      background: #fff !important;
+      color: #181818 !important;
+      font-family: 'Courier New', Courier, monospace !important;
+      font-size: 12px !important;
+      line-height: 1.0 !important;
     }
     .remito-container {
       border: none !important;
       padding: 0 0 0 0 !important;
     }
-    .datos th, .datos td {
-      font-size: 1em;
-      padding: 2px 6px 2px 0;
-      color: #181818;
-    }
-    table.items {
-      font-size: 1em;
-      margin: 8px 0 0 0;
-      border-collapse: collapse;
-      background: #fff;
-      color: #181818;
-      width: 100%;
-    }
-    table.items th {
-      background: #181818;
-      color: #fff;
-      font-weight: bold;
-      border: 1.5px solid #181818;
-      padding: 8px 6px;
-    }
-    table.items td {
-      border: 1.5px solid #181818;
-      padding: 8px 6px;
-      color: #181818;
-      background: #fff;
+    .datos th, .datos td, .maquinas-lista li, .maquinas-lista span {
+      font-family: 'Courier New', Courier, monospace !important;
+      font-size: 12px !important;
+      line-height: 1.0 !important;
     }
     hr { display: none; }
     @media print {
@@ -150,6 +134,74 @@ if (isset($remito_numero) && !$remito_guardado) {
         background: #fff !important;
         color: #181818 !important;
       }
+      @page { size: 80mm auto; margin: 2mm; }
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 16px;
+        margin: 0;
+        background: #fff !important;
+        color: #000 !important;
+        min-width: 80mm;
+        max-width: 80mm;
+        font-weight: bold !important;
+      }
+      .remito-container, .datos, .footer {
+        max-width: 80mm !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        background: #fff !important;
+        color: #000 !important;
+        font-weight: bold !important;
+      }
+      .remito-title {
+        font-size: 20px;
+        font-weight: bold;
+        margin: 0 0 2px 0;
+        text-transform: uppercase;
+        text-align: center;
+        color: #000 !important;
+      }
+      .empresa-info, .footer {
+        font-size: 14px;
+        margin: 0 0 2px 0;
+        text-align: center;
+        color: #000 !important;
+        font-weight: bold !important;
+      }
+      .datos th, .datos td {
+        font-size: 14px;
+        padding: 0 2px 0 0;
+        text-align: left;
+        color: #000 !important;
+        font-weight: bold !important;
+      }
+      .maquinas-lista {
+        list-style: none;
+        padding: 0;
+        margin: 6px 0 0 0;
+      }
+      .maquinas-lista li {
+        font-size: 15px;
+        color: #000 !important;
+        font-weight: bold !important;
+        border-bottom: 1px dashed #888;
+        margin-bottom: 2px;
+        padding-bottom: 2px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .maquinas-lista span {
+        display: inline-block;
+        min-width: 40px;
+        text-align: right;
+        color: #000 !important;
+        font-weight: bold !important;
+      }
+      hr { display: none; }
+      table.items { display: none !important; }
     }
   </style>
 </head>
@@ -274,54 +326,19 @@ function afterPrint() {
 }
 
 window.onbeforeprint = beforePrint;
-window.onafterprint = afterPrint;
-
-// Inicializar visibilidad al cargar
-window.addEventListener('DOMContentLoaded', function() {
-  toggleSucursalFields();
-});
-function guardarDatosRemito() {
-  var bultos = document.getElementById('bultos').value;
-  var envio = '';
-  var radios = document.getElementsByName('envio');
-  for (var i = 0; i < radios.length; i++) {
-    if (radios[i].checked) { envio = radios[i].value; break; }
-  }
-  var nombreSucursal = document.getElementById('nombre_sucursal').value;
-  var direccionSucursal = document.getElementById('direccion_sucursal').value;
-  var transporte = document.getElementById('transporte').value;
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', 'remito_update.php', true);
-  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-  xhr.send('numero=<?= $remito_numero ?>'
-    + '&bultos=' + encodeURIComponent(bultos)
-    + '&tipo_envio=' + encodeURIComponent(envio)
-    + '&nombre_sucursal=' + encodeURIComponent(nombreSucursal)
-    + '&direccion_sucursal=' + encodeURIComponent(direccionSucursal)
-    + '&transporte=' + encodeURIComponent(transporte));
-}
-
-document.getElementById('remitoForm').addEventListener('change', guardarDatosRemito);
-window.onbeforeprint = function() { beforePrint(); guardarDatosRemito(); };
-window.onafterprint = afterPrint;
+window.onafterprint = null;
 </script>
 <div style="text-align:right; margin: 18px 0 0 0;">
   <button onclick="window.print()" style="font-size:1.1em; padding:7px 18px; background:#181818; color:#fff; border:none; border-radius:5px; cursor:pointer;">Imprimir Remito</button>
 </div>
-<table class="items">
-  <thead>
-    <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th></tr>
-  </thead>
-  <tbody>
-    <?php foreach ($items as $it): ?>
-    <tr>
-      <td><?= e($it['nombre']) ?></td>
-      <td><?= (float)$it['cant'] ?></td>
-      <td><?= e($it['unidad']) ?></td>
-    </tr>
-    <?php endforeach; ?>
-  </tbody>
-</table>
+<ul class="maquinas-lista">
+<?php foreach ($items as $it): ?>
+  <li>
+    <b><?= e($it['nombre']) ?></b>
+    <span><?= (float)$it['cant'] ?> <?= e($it['unidad']) ?></span>
+  </li>
+<?php endforeach; ?>
+</ul>
 
 <?php if (!empty($order['observaciones'])): ?>
 <div style="max-width:700px; margin:28px auto 0 auto; padding:18px 22px; background:#fff; border:2px solid #181818; border-radius:8px; font-size:1.08em; color:#181818;">
