@@ -251,7 +251,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="mb-0">Compras de MP</h5>
-    <a class="btn btn-primary" href="<?= url('compra_nueva.php') ?>">Registrar compra</a>
+    <a class="btn btn-primary" href="<?= url('compra_nueva1.php') ?>">Registrar compra</a>
   </div>
 
   <?php if ($flash_ok): ?><div class="alert alert-success"><?= e($flash_ok) ?></div><?php endif; ?>

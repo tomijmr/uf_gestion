@@ -19,9 +19,9 @@ if (!function_exists('can')) {
 // Agregado: acceso directo al diseñador
 // Agregado: Remitos como menú principal
 $MENU = [
-  ['label' => 'Remitos', 'href' => url('remitos.php'), 'roles' => ['*']],
   ['label' => 'Dashboard', 'href' => url('dashboard.php'), 'roles' => ['*']],
-  ['label' => 'Diseñador', 'href' => url('diseñador.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH','LECTURA','CAJA','VENTAS']],
+  // Nuevo: Proveedores
+  ['label' => 'Proveedores', 'href' => url('proveedores.php'), 'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO','LECTURA','VENTAS']],
   
   // Categoría: Clientes
   [
@@ -77,6 +77,8 @@ $MENU = [
       ['label' => 'Reporte Compras','href' => url('compras.php'),             'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO']],
     ]
   ],
+    ['label' => 'Remitos', 'href' => url('remitos.php'), 'roles' => ['*']],
+  ['label' => 'Diseñador', 'href' => url('diseñador.php'), 'roles' => ['ADMIN','PRODUCCION','DEPOSITO','RRHH','LECTURA','CAJA','VENTAS']],
 ];
 
 // Note: Se ha cambiado el nombre del item de menú de 'Productos' a 'Materias Primas' y se agregó 'Productos Terminados'.
