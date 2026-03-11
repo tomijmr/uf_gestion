@@ -7,9 +7,17 @@ require_once __DIR__ . '/../app/helpers.php';
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 
+
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $guardado = false;
 $error = '';
+
+// Recalcular saldo si se solicita (antes de obtener datos)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recalcular_saldo' && $id > 0) {
+    require_once __DIR__ . '/../scripts/recalcular_customer_ledger.php';
+    recalcular_customer_ledger($id);
+    $guardado = true;
+}
 
 // --- Guardar (alta o edición) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -167,7 +175,6 @@ if ($id > 0) {
   </form>
 
 <?php if($id > 0): ?>
-
     <hr class="my-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h3 class="mb-0"><i class="bi bi-wallet2"></i> Estado de Cuenta</h3>
