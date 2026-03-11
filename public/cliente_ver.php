@@ -186,14 +186,16 @@ if ($id > 0) {
             </form>
         </div>
     </div>
-// Recalcular saldo si se solicita
+
+    <?php
+// recalcular saldo si se solicita
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recalcular_saldo' && $id > 0) {
     require_once __DIR__ . '/../scripts/recalcular_customer_ledger.php';
     recalcular_customer_ledger($id);
     $guardado = true;
 }
 
-    <?php
     // Calculate totals
     $total_deuda_inicial = (float)($row['saldo_deuda'] ?? 0);
 
