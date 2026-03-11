@@ -167,12 +167,24 @@ if ($id > 0) {
   </form>
 
 <?php if($id > 0): ?>
+
     <hr class="my-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h3 class="mb-0"><i class="bi bi-wallet2"></i> Estado de Cuenta</h3>
-        <!-- Boton para registrar pago directo -->
-        <a href="caja.php?customer_id=<?= $id ?>" class="btn btn-success"><i class="bi bi-cash-coin"></i> Registrar Nuevo Pago</a>
+        <div class="d-flex gap-2">
+            <a href="caja.php?customer_id=<?= $id ?>" class="btn btn-success"><i class="bi bi-cash-coin"></i> Registrar Nuevo Pago</a>
+            <form method="post" action="" style="display:inline;">
+                <input type="hidden" name="action" value="recalcular_saldo">
+                <button type="submit" class="btn btn-warning">Actualizar saldo</button>
+            </form>
+        </div>
     </div>
+// Recalcular saldo si se solicita
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recalcular_saldo' && $id > 0) {
+    require_once __DIR__ . '/../scripts/recalcular_customer_ledger.php';
+    recalcular_customer_ledger($id);
+    $guardado = true;
+}
 
     <?php
     // Calculate totals
