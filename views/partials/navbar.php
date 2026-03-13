@@ -20,8 +20,7 @@ if (!function_exists('can')) {
 // Agregado: Remitos como menú principal
 $MENU = [
   ['label' => 'Dashboard', 'href' => url('dashboard.php'), 'roles' => ['*']],
-  // Nuevo: Proveedores
-  ['label' => 'Proveedores', 'href' => url('proveedores.php'), 'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO','LECTURA','VENTAS']],
+  // Nuevo: Proveedores (ahora dentro de Caja)
   
   // Categoría: Clientes
   [
@@ -60,6 +59,7 @@ $MENU = [
     'items' => [
       ['label' => 'Caja',      'href' => url('caja.php'),      'roles' => ['ADMIN','CAJA', 'RRHH']],
       ['label' => 'Compras',   'href' => url('compras.php'),   'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO']],
+      ['label' => 'Proveedores', 'href' => url('proveedores.php'), 'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO','LECTURA','VENTAS']],
     ]
   ],
 
