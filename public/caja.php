@@ -799,22 +799,23 @@ if ($tab === 'reportes') {
     if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
       // Usamos CAST para evitar problemas de colación en el UNION
       $sqlRG = "SELECT e.id, e.fecha, 
-                     CAST(e.categoria AS CHAR) as categoria, 
-                     CAST(e.descripcion AS CHAR) as descripcion, 
-                     CAST(e.medio AS CHAR) as medio, 
+                     CAST(e.categoria AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as categoria, 
+                     CAST(e.descripcion AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as descripcion, 
+                     CAST(e.medio AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as medio, 
                      e.importe, 
-                     CAST(u.nombre AS CHAR) AS usuario 
+                     CAST(u.nombre AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) AS usuario 
               FROM cash_expenses e
               LEFT JOIN users u ON u.id = e.created_by
               WHERE DATE(e.fecha) BETWEEN ? AND ?
 
               UNION ALL
 
-              SELECT p.id, p.fecha, 'COMPRA' as categoria,
-                CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) as descripcion,
-                'COMPRA' as medio,
+              SELECT p.id, p.fecha,
+                CAST('COMPRA' AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as categoria,
+                CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as descripcion,
+                CAST('COMPRA' AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) as medio,
                 p.total as importe,
-                u.nombre AS usuario
+                CAST(u.nombre AS CHAR CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) AS usuario
               FROM purchases p
               LEFT JOIN users u ON u.id = p.created_by
               WHERE DATE(p.fecha) BETWEEN ? AND ?
