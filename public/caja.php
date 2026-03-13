@@ -798,7 +798,7 @@ if ($tab === 'reportes') {
     // GASTOS (Gastos Caja + Compras)
     if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
       // Usamos CAST para evitar problemas de colación en el UNION
-      $sqlRG = "SELECT e.fecha, 
+      $sqlRG = "SELECT e.id, e.fecha, 
                      CAST(e.categoria AS CHAR) as categoria, 
                      CAST(e.descripcion AS CHAR) as descripcion, 
                      CAST(e.medio AS CHAR) as medio, 
