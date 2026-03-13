@@ -795,10 +795,10 @@ if ($tab === 'reportes') {
     }
   }
 
-  // GASTOS (Gastos Caja + Compras)
-  if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
-    // Usamos CAST para evitar problemas de colación en el UNION
-    $sqlRG = "SELECT e.fecha, 
+    // GASTOS (Gastos Caja + Compras)
+    if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
+      // Usamos CAST para evitar problemas de colación en el UNION
+      $sqlRG = "SELECT e.fecha, 
                      CAST(e.categoria AS CHAR) as categoria, 
                      CAST(e.descripcion AS CHAR) as descripcion, 
                      CAST(e.medio AS CHAR) as medio, 
@@ -822,12 +822,12 @@ if ($tab === 'reportes') {
 
               ORDER BY fecha $g_orden_fecha, id $g_orden_fecha
               LIMIT 200";
-    $paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta]);
-    $stG = db()->prepare($sqlG);
-    $stG->execute($paramsG2);
-    $rep_gastos = $stG->fetchAll();
-    foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
-  }
+      $paramsRep = [$rep_desde, $rep_hasta, $rep_desde, $rep_hasta];
+      $stG = db()->prepare($sqlRG);
+      $stG->execute($paramsRep);
+      $rep_gastos = $stG->fetchAll();
+      foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
+    }
 }
 
 function money0($n) { return '$ ' . number_format((float)$n, 0, ',', '.'); }
