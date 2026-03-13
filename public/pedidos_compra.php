@@ -202,7 +202,7 @@ $pedidos = $st->fetchAll();
 // Listado de proveedores para el select
 $proveedores = db()->query("SELECT id, nombre FROM proveedores ORDER BY nombre")->fetchAll();
 // Listado de materias primas activas
-$materias_primas = db()->query("SELECT id, nombre, unidad, precio FROM products WHERE tipo='MP' AND activo=1 ORDER BY nombre")->fetchAll();
+$materias_primas = db()->query("SELECT id, nombre, unidad, precio_std as precio FROM products WHERE tipo='MP' AND activo=1 ORDER BY nombre")->fetchAll();
 
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
