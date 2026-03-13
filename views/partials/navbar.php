@@ -59,6 +59,7 @@ $MENU = [
     'items' => [
       ['label' => 'Caja',      'href' => url('caja.php'),      'roles' => ['ADMIN','CAJA', 'RRHH']],
       ['label' => 'Compras',   'href' => url('compras.php'),   'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO']],
+      ['label' => 'Pedidos de Compra', 'href' => url('pedidos_compra.php'), 'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO']],
       ['label' => 'Proveedores', 'href' => url('proveedores.php'), 'roles' => ['ADMIN','CAJA','RRHH','DEPOSITO','LECTURA','VENTAS']],
     ]
   ],

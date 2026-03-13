@@ -10,14 +10,30 @@ function compra_all_by_proveedor($proveedor_id) {
 }
 
 
-function compra_create($data) {
-    $stmt = db()->prepare("INSERT INTO purchases (proveedor, fecha, comp_numero, total, notas, estado, pago_id) VALUES (?, ?, ?, ?, ?, 'PENDIENTE', NULL)");
+function compra_create($data, $forzarConsolidada = false) {
+    $estado = $forzarConsolidada ? 'CONSOLIDADA' : 'PENDIENTE';
+    $pago_id = $forzarConsolidada && isset($data['pago_id']) ? $data['pago_id'] : null;
+    $comp_tipo = $data['comp_tipo'] ?? 'OTRO';
+    $comp_serie = $data['comp_serie'] ?? '';
+    $moneda = $data['moneda'] ?? 'ARS';
+    $archivo_path = $data['archivo_path'] ?? null;
+    $created_by = $data['created_by'] ?? (function_exists('user') ? (int)user()['id'] : 1);
+    $incluye_iva = $data['incluye_iva'] ?? 1;
+    $stmt = db()->prepare("INSERT INTO purchases (proveedor, fecha, comp_tipo, comp_serie, comp_numero, total, moneda, archivo_path, notas, created_by, incluye_iva, estado, pago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute([
         $data['proveedor'],
         $data['fecha'],
+        $comp_tipo,
+        $comp_serie,
         $data['comp_numero'],
         $data['total'],
-        $data['notas']
+        $moneda,
+        $archivo_path,
+        $data['notas'],
+        $created_by,
+        $incluye_iva,
+        $estado,
+        $pago_id
     ]);
     return db()->lastInsertId();
 }
