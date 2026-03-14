@@ -142,35 +142,41 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'reportes') {
 
   // GASTOS (Gastos Caja + Compras)
   if ($rep_tipo === 'AMBOS' || $rep_tipo === 'GASTOS') {
+    // Inicializar variables para evitar warnings y errores
+    $g_orden_fecha = 'DESC';
+    $g_desde = $rep_desde ?? date('Y-m-01');
+    $g_hasta = $rep_hasta ?? date('Y-m-d');
+    $paramsG = [];
     // Usamos CAST para evitar problemas de colación en el UNION
     $sqlRG = "SELECT e.fecha, 
-                     CAST(e.categoria AS CHAR) as categoria, 
-                     CAST(e.descripcion AS CHAR) as descripcion, 
-                     CAST(e.medio AS CHAR) as medio, 
+                     CAST(e.categoria AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as categoria, 
+                     CAST(e.descripcion AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as descripcion, 
+                     CAST(e.medio AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as medio, 
                      e.importe, 
-                     CAST(u.nombre AS CHAR) AS usuario 
+                     CAST(u.nombre AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS usuario 
               FROM cash_expenses e
               LEFT JOIN users u ON u.id = e.created_by
               WHERE DATE(e.fecha) BETWEEN ? AND ?
 
               UNION ALL
 
-              SELECT p.id, p.fecha, 'COMPRA' as categoria,
-                CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) as descripcion,
-                'COMPRA' as medio,
+              SELECT p.fecha, 
+                CAST('COMPRA' AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as categoria,
+                CAST(CONCAT('Prov: ', p.proveedor, ' - ', p.comp_tipo, ' ', p.comp_numero, IF(p.notas IS NOT NULL AND p.notas != '', CONCAT(' (', p.notas, ')'), '')) AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as descripcion,
+                CAST('COMPRA' AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as medio,
                 p.total as importe,
-                u.nombre AS usuario
+                CAST(u.nombre AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AS usuario
               FROM purchases p
               LEFT JOIN users u ON u.id = p.created_by
               WHERE DATE(p.fecha) BETWEEN ? AND ?
                 AND p.estado = 'CONSOLIDADA'
 
-              ORDER BY fecha $g_orden_fecha, id $g_orden_fecha
+              ORDER BY fecha $g_orden_fecha
               LIMIT 200";
-    $paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta]);
-    $stG = db()->prepare($sqlG);
+    $paramsG2 = array_merge($paramsG, [$g_desde, $g_hasta, $g_desde, $g_hasta]);
+    $stG = db()->prepare($sqlRG);
     $stG->execute($paramsG2);
-    $gastos = $stG->fetchAll();
+    $rep_gastos = $stG->fetchAll();
     foreach ($rep_gastos as $r) $rep_total_gastos += (float)$r['importe'];
   }
 
