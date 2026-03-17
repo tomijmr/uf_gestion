@@ -1,0 +1,244 @@
+POST cantidad_por_unidad: Array
+(
+    [0] => 6
+)
+
+POST cantidad: Array
+(
+    [0] => 10
+)
+
+POST completo: Array
+(
+    [fecha] => 2026-03-17T15:01
+    [proveedor_id] => 1
+    [comp_tipo] => TICKET
+    [comp_serie] => 1
+    [comp_numero] => 12312
+    [notas] => 
+    [incluye_iva] => on
+    [codigo] => Array
+        (
+            [0] => MP002
+        )
+
+    [nombre] => Array
+        (
+            [0] => Caño Rectangular 2mm 40x80
+        )
+
+    [unidad] => Array
+        (
+            [0] => UN
+        )
+
+    [cantidad] => Array
+        (
+            [0] => 10
+        )
+
+    [costo_unit] => Array
+        (
+            [0] => 6000
+        )
+
+    [cantidad_por_unidad] => Array
+        (
+            [0] => 6
+        )
+
+    [notas_item] => Array
+        (
+            [0] => 
+        )
+
+    [product_id] => Array
+        (
+            [0] => 62
+        )
+
+)
+
+POST cantidad_por_unidad: Array
+(
+    [0] => 6
+)
+
+POST cantidad: Array
+(
+    [0] => 10
+)
+
+POST completo: Array
+(
+    [fecha] => 2026-03-17T15:05
+    [proveedor_id] => 1
+    [comp_tipo] => FACTURA
+    [comp_serie] => a
+    [comp_numero] => 123124555
+    [notas] => 
+    [incluye_iva] => on
+    [codigo] => Array
+        (
+            [0] => MP003
+        )
+
+    [nombre] => Array
+        (
+            [0] => Caño Rectangular 2mm 50x70
+        )
+
+    [unidad] => Array
+        (
+            [0] => UN
+        )
+
+    [cantidad] => Array
+        (
+            [0] => 10
+        )
+
+    [costo_unit] => Array
+        (
+            [0] => 6000
+        )
+
+    [cantidad_por_unidad] => Array
+        (
+            [0] => 6
+        )
+
+    [notas_item] => Array
+        (
+            [0] => 
+        )
+
+    [product_id] => Array
+        (
+            [0] => 63
+        )
+
+)
+
+POST cantidad_por_unidad: Array
+(
+    [0] => 6
+)
+
+POST cantidad: Array
+(
+    [0] => 10
+)
+
+POST completo: Array
+(
+    [fecha] => 2026-03-17T15:10
+    [proveedor_id] => 1
+    [comp_tipo] => REMITO
+    [comp_serie] => 1
+    [comp_numero] => 1231
+    [notas] => 
+    [incluye_iva] => on
+    [codigo] => Array
+        (
+            [0] => MP003
+        )
+
+    [nombre] => Array
+        (
+            [0] => Caño Rectangular 2mm 50x70
+        )
+
+    [unidad] => Array
+        (
+            [0] => UN
+        )
+
+    [cantidad] => Array
+        (
+            [0] => 10
+        )
+
+    [costo_unit] => Array
+        (
+            [0] => 6000
+        )
+
+    [cantidad_por_unidad] => Array
+        (
+            [0] => 6
+        )
+
+    [notas_item] => Array
+        (
+            [0] => 
+        )
+
+    [product_id] => Array
+        (
+            [0] => 63
+        )
+
+)
+
+POST cantidad_por_unidad: Array
+(
+    [0] => 6
+)
+
+POST cantidad: Array
+(
+    [0] => 10
+)
+
+POST completo: Array
+(
+    [fecha] => 2026-03-17T15:22
+    [proveedor_id] => 1
+    [comp_tipo] => REMITO
+    [comp_serie] => x
+    [comp_numero] => 12355511
+    [notas] => 
+    [incluye_iva] => on
+    [codigo] => Array
+        (
+            [0] => MP004
+        )
+
+    [nombre] => Array
+        (
+            [0] => Caño Rectangular 2mm 40x60
+        )
+
+    [unidad] => Array
+        (
+            [0] => UN
+        )
+
+    [cantidad] => Array
+        (
+            [0] => 10
+        )
+
+    [costo_unit] => Array
+        (
+            [0] => 6000
+        )
+
+    [cantidad_por_unidad] => Array
+        (
+            [0] => 6
+        )
+
+    [notas_item] => Array
+        (
+            [0] => 
+        )
+
+    [product_id] => Array
+        (
+            [0] => 64
+        )
+
+)
+

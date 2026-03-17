@@ -52,6 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $unidades    = $_POST['unidad'] ?? [];
     $cantidades  = $_POST['cantidad'] ?? [];
     $costos      = $_POST['costo_unit'] ?? [];
+    $cantidades_por_unidad = $_POST['cantidad_por_unidad'] ?? [];
     $notas_i     = $_POST['notas_item'] ?? [];
 
     if (!is_array($codigos) || count($codigos) === 0) throw new Exception('Debe cargar al menos un ítem.');
@@ -82,6 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $insP->execute([$fecha, $proveedor['nombre'], $comp_tipo, $comp_serie, $comp_num, $moneda, $archivo_path, $notas, (int)user()['id'], $incluye_iva]);
     $purchase_id = (int)db()->lastInsertId();
 
+    $subtotal = 0.0;
+    $iva = 0.0;
     $total = 0.0;
 
     // Prepared statements
@@ -104,34 +107,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $codigo = trim($codigo ?? '');
       $nombre = trim($nombres[$i] ?? '');
       $unidad = trim($unidades[$i] ?? 'UN');
-      $cant   = (float)($cantidades[$i] ?? 0);
-      
-      // CORRECCIÓN DEL PARSEO: Reemplazar coma por punto para que PHP lo interprete como float.
-      $costo_raw = trim($costos[$i] ?? '0');
-      $costoU = (float) str_replace(',', '.', $costo_raw); 
-      
       $notaI  = trim($notas_i[$i] ?? '');
       $pidRaw = $product_ids[$i] ?? '';
 
-      if ($codigo === '' || $nombre === '') throw new Exception("Ítem #".($i+1).": código y nombre son obligatorios.");
-      if ($cant <= 0 || $costoU < 0) throw new Exception("Ítem #".($i+1).": cantidad y costo deben ser válidos.");
-
-      $product_id = null;
-
       // 1) Si vino product_id del picker, usarlo
+      $product_id = null;
       if ($pidRaw !== '' && ctype_digit((string)$pidRaw)) {
         $pid = (int)$pidRaw;
         $selProdById->execute([$pid]);
         $prod = $selProdById->fetch();
         if ($prod) {
           $product_id = (int)$prod['id'];
-          // Sincronizar valores base
           $codigo = $prod['codigo'];
           if ($nombre === '') $nombre = $prod['nombre'];
           if ($unidad === '') $unidad = $prod['unidad'];
         }
       }
-
       // 2) Si no hay product_id, buscar por código
       if (!$product_id) {
         $selProdByCode->execute([$codigo]);
@@ -143,34 +134,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
       }
 
+      // Calcular cantidad y costo unitario SIEMPRE después de obtener el producto
+      $bultos = (float)($cantidades[$i] ?? 0); // cantidad de bultos
+      $perpack = isset($cantidades_por_unidad[$i]) ? (float)$cantidades_por_unidad[$i] : 1;
+      if ($perpack < 1) $perpack = 1;
+      $cant = $bultos * $perpack; // cantidad total para stock y registro
+      $costo_raw = trim($costos[$i] ?? '0');
+      $costo_bulto = (float) str_replace(',', '.', $costo_raw); // costo total del bulto
+      $costoU = $perpack > 0 ? $costo_bulto / $perpack : 0; // costo SIEMPRE por unidad
+
+      if ($codigo === '' || $nombre === '') throw new Exception("Ítem #".($i+1).": código y nombre son obligatorios.");
+      if ($cant <= 0 || $costoU < 0) throw new Exception("Ítem #".($i+1).": cantidad y costo deben ser válidos.");
+
       // 3) Si no existe, alta rápida como MP
       if (!$product_id) {
         $insProd->execute([$codigo, $nombre, 'MP', ($unidad?:'UN'), $costoU]);
         $product_id = (int)db()->lastInsertId();
       } else {
-        // CORRECCIÓN ANTERIOR: Si existe, actualizar costo_std y unidad (último costo & unidad preferida)
-        // Se usa 'UN' como fallback si la unidad del formulario y la de la DB están vacías.
         $updCosto->execute([$costoU, $unidad ?: $prod['unidad'] ?: 'UN', $product_id]);
       }
-
-      // Stock +
       $updStock->execute([$cant, $product_id]);
-
-      // Movimiento de stock (COMPRA)
       $obs = "Compra $comp_tipo $comp_serie-$comp_num";
       $insStockMove->execute([$product_id, $cant, $purchase_id, $obs]);
-
-      // Ítem compra
-      $subtotal = round($cant * $costoU, 2);
-      $total += $subtotal;
-      $insItem->execute([$purchase_id, $product_id, $codigo, $nombre, $unidad?:'UN', $cant, $costoU, $subtotal, $notaI]);
+      $item_subtotal = round($cant * $costoU, 2);
+      $subtotal += $item_subtotal;
+      $insItem->execute([$purchase_id, $product_id, $codigo, $nombre, $unidad?:'UN', $cant, $costoU, $item_subtotal, $notaI]);
     }
+
+    // Calcular IVA si corresponde
+    if ($incluye_iva) {
+      $iva = round($subtotal * 0.21, 2);
+    }
+    $total = $subtotal + $iva;
 
     // Total compra
     db()->prepare("UPDATE purchases SET total=? WHERE id=?")->execute([$total, $purchase_id]);
 
     db()->commit();
-    header('Location: ' . url('compras.php?ok=' . urlencode('Compra registrada.')));
+    header('Location: ' . url('compras.php?ok=' . urlencode('Compra registrada. Subtotal: $' . number_format($subtotal,2,',','.') . ' IVA: $' . number_format($iva,2,',','.') . ' Total: $' . number_format($total,2,',','.'))));
     exit;
 
   } catch (Throwable $e) {
@@ -257,6 +258,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               <th style="width:90px;">Unidad</th>
               <th style="width:120px;">Cantidad *</th>
               <th style="width:140px;">Costo unit. *</th>
+              <th style="width:120px;">Cant. por unidad</th>
               <th>Notas</th>
               <th style="width:120px;">Producto</th>
               <th style="width:50px;"></th>
@@ -267,7 +269,9 @@ include __DIR__ . '/../views/partials/navbar.php';
       </div>
 
       <div class="text-end">
-        <strong>Total estimado: $ <span id="totalSpan">0,00</span></strong>
+        <div><strong>Subtotal: $ <span id="subtotalSpan">0,00</span></strong></div>
+        <div><strong>IVA (21%): $ <span id="ivaSpan">0,00</span></strong></div>
+        <div><strong>Total estimado: $ <span id="totalSpan">0,00</span></strong></div>
       </div>
     </div>
     <div class="card-footer text-end">
@@ -339,6 +343,10 @@ function addItem(data={}) {
       <input type="number" step="0.0001" min="0" class="form-control form-control-sm cost" name="costo_unit[]" required value="${data.costo_unit||''}">
     </td>
     <td>
+      <input type="number" step="0.0001" min="1" class="form-control form-control-sm perpack" name="cantidad_por_unidad[]" value="${data.cantidad_por_unidad||''}" placeholder="Ej: 6">
+      <small class="text-muted">(opcional, para dividir el costo y multiplicar el stock)</small>
+    </td>
+    <td>
       <input class="form-control form-control-sm" name="notas_item[]" value="${data.notas||''}">
     </td>
     <td class="text-nowrap">
@@ -355,6 +363,7 @@ function addItem(data={}) {
   // Listeners de la fila
   tr.querySelector('.qty').addEventListener('input', updateTotal);
   tr.querySelector('.cost').addEventListener('input', updateTotal);
+  tr.querySelector('.perpack').addEventListener('input', updateTotal);
   tr.querySelector('.code').addEventListener('blur', () => autoFillFromCode(tr));
   tr.querySelector('.picker-btn').addEventListener('click', () => openPickerForRow(tr));
 
@@ -462,18 +471,28 @@ function pickProduct(p) {
 
 // Utilidades
 function updateTotal(){
-  let t = 0;
+  let subtotal = 0;
   document.querySelectorAll('#itemsTable tbody tr').forEach(tr=>{
     const q = parseFloat(tr.querySelector('.qty')?.value || '0');
     const c = parseFloat(tr.querySelector('.cost')?.value || '0');
-    t += (q*c);
+    subtotal += (q*c);
   });
-  document.getElementById('totalSpan').innerText = money(t);
+  let iva = 0;
+  if(document.getElementById('incluye_iva').checked){
+    iva = Math.round(subtotal * 0.21 * 100) / 100;
+  }
+  let total = subtotal + iva;
+  document.getElementById('subtotalSpan').innerText = money(subtotal);
+  document.getElementById('ivaSpan').innerText = money(iva);
+  document.getElementById('totalSpan').innerText = money(total);
 }
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
+
+// Actualizar totales al cambiar el checkbox de IVA
+document.getElementById('incluye_iva').addEventListener('change', updateTotal);
 
 // agrega una fila por defecto
 addItem();
