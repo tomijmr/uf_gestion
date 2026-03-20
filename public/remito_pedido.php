@@ -1,11 +1,18 @@
+
+
 <?php
-require_once __DIR__ . '/../app/db.php';
-require_once __DIR__ . '/../app/helpers.php';
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
+// Mostrar errores de PHP para debug
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-$order_id = (int)($_GET['id'] ?? 0);
+require_once __DIR__ . '/../app/db.php';
+require_once __DIR__ . '/../app/helpers.php';
+
+$order_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+
+
+    
 if (!$order_id) die('Pedido no especificado');
 
 // Traer pedido y cliente
@@ -68,7 +75,7 @@ if (isset($remito_numero) && !$remito_guardado) {
   <meta charset="utf-8">
   <title>Remito Pedido #<?= $order_id ?></title>
   <style>
-    @page { size: A4 landscape; margin: 10mm; }
+    @page { size: A4 portrait; margin: 10mm; }
     body {
       font-family: Arial, sans-serif;
       font-size: 20px;
@@ -235,22 +242,7 @@ function renderRemitos() {
           <tr><th>Cant. de Bultos:</th><td>${bultos}</td></tr>
         </table>
       </div>
-      <div class="remito-items">
-        <table>
-          <thead>
-            <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th></tr>
-          </thead>
-          <tbody>
-          <?php foreach ($items as $it): ?>
-            <tr>
-              <td><?= e($it['nombre']) ?></td>
-              <td><?= (float)$it['cant'] ?></td>
-              <td><?= e($it['unidad']) ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
+      <!-- Sin productos/maquinas, solo datos de envío -->
       <?php if (!empty($order['observaciones'])): ?>
       <div class="remito-obs">
         <strong>Notas:</strong> <?= nl2br(e($order['observaciones'])) ?>
