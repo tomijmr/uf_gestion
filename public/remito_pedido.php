@@ -189,58 +189,84 @@ if (isset($remito_numero) && !$remito_guardado) {
   </style>
 </head>
 <body>
-<div class="remitos-grid">
-<?php for ($i = 0; $i < 4; $i++): ?>
-  <div class="remito-box">
-    <div class="remito-header">
-      <div class="remito-title">Remito de Despacho</div>
-      <div class="empresa-info">
-        <strong><?= e($empresa['nombre']) ?></strong> | CUIT: <?= e($empresa['cuit']) ?><br>
-        <?= e($empresa['direccion']) ?> | Tel: <?= e($empresa['telefono']) ?>
-      </div>
-      <div style="font-size:0.98em; margin-bottom:2px;">N° Remito: <?= $remito_numero ?> &nbsp; | &nbsp; Fecha: <?= date('d/m/Y') ?></div>
-    </div>
-    <div class="remito-datos">
-      <table>
-        <tr><th>Cliente:</th><td><?= e($order['cliente_nombre']) ?></td></tr>
-        <tr><th>CUIT/DNI:</th><td><?= e($order['cuit_dni']) ?></td></tr>
-        <tr><th>Teléfono:</th><td><?= e($order['telefono']) ?></td></tr>
-        <tr><th>Dirección:</th><td><?= e($order['cliente_direccion']) ?></td></tr>
-        <tr><th>Pedido N°:</th><td><?= $order_id ?></td></tr>
-        <tr><th>Fecha Pedido:</th><td><?= date('d/m/Y', strtotime($order['fecha'])) ?></td></tr>
-        <tr><th>Fecha Pactada:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
-        <tr><th>Transporte:</th><td><?= e($order['empresa_transporte'] ?? '-') ?></td></tr>
-      </table>
-    </div>
-    <div class="remito-items">
-      <table>
-        <thead>
-          <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th></tr>
-        </thead>
-        <tbody>
-        <?php foreach ($items as $it): ?>
-          <tr>
-            <td><?= e($it['nombre']) ?></td>
-            <td><?= (float)$it['cant'] ?></td>
-            <td><?= e($it['unidad']) ?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
-    </div>
-    <?php if (!empty($order['observaciones'])): ?>
-    <div class="remito-obs">
-      <strong>Notas:</strong> <?= nl2br(e($order['observaciones'])) ?>
-    </div>
-    <?php endif; ?>
-    <div class="remito-footer">
-      Remito generado automáticamente - Universal Fitness
-    </div>
-  </div>
-<?php endfor; ?>
+<form id="remitoForm" style="margin-bottom:18px; text-align:left;">
+  <label style="font-size:1em; margin-right:18px;">
+    Transporte:
+    <input type="text" id="inputTransporte" name="transporte" value="<?= e($order['empresa_transporte'] ?? '') ?>" style="font-size:1em; padding:2px 8px; width:180px;">
+  </label>
+  <label style="font-size:1em;">
+    Cant. de Bultos:
+    <input type="number" id="inputBultos" name="bultos" min="1" max="999" style="font-size:1em; padding:2px 8px; width:80px;">
+  </label>
+</form>
+<div class="remitos-grid" id="remitosGrid">
+<!-- Los remitos se renderizan por JS para reflejar los campos -->
 </div>
 <div style="text-align:right; margin: 18px 0 0 0;">
   <button onclick="window.print()" style="font-size:1.1em; padding:7px 18px; background:#181818; color:#fff; border:none; border-radius:5px; cursor:pointer;">Imprimir Remitos</button>
 </div>
+<script>
+function renderRemitos() {
+  const transporte = document.getElementById('inputTransporte').value || '-';
+  const bultos = document.getElementById('inputBultos').value || '-';
+  const grid = document.getElementById('remitosGrid');
+  let html = '';
+  for (let i = 0; i < 4; i++) {
+    html += `
+    <div class="remito-box">
+      <div class="remito-header">
+        <div class="remito-title">Remito de Despacho</div>
+        <div class="empresa-info">
+          <strong><?= e($empresa['nombre']) ?></strong> | CUIT: <?= e($empresa['cuit']) ?><br>
+          <?= e($empresa['direccion']) ?> | Tel: <?= e($empresa['telefono']) ?>
+        </div>
+        <div style="font-size:0.98em; margin-bottom:2px;">N° Remito: <?= $remito_numero ?> &nbsp; | &nbsp; Fecha: <?= date('d/m/Y') ?></div>
+      </div>
+      <div class="remito-datos">
+        <table>
+          <tr><th>Cliente:</th><td><?= e($order['cliente_nombre']) ?></td></tr>
+          <tr><th>CUIT/DNI:</th><td><?= e($order['cuit_dni']) ?></td></tr>
+          <tr><th>Teléfono:</th><td><?= e($order['telefono']) ?></td></tr>
+          <tr><th>Dirección:</th><td><?= e($order['cliente_direccion']) ?></td></tr>
+          <tr><th>Pedido N°:</th><td><?= $order_id ?></td></tr>
+          <tr><th>Fecha Pedido:</th><td><?= date('d/m/Y', strtotime($order['fecha'])) ?></td></tr>
+          <tr><th>Fecha Pactada:</th><td><?= $order['fecha_entrega'] ? date('d/m/Y', strtotime($order['fecha_entrega'])) : '-' ?></td></tr>
+          <tr><th>Transporte:</th><td>${transporte}</td></tr>
+          <tr><th>Cant. de Bultos:</th><td>${bultos}</td></tr>
+        </table>
+      </div>
+      <div class="remito-items">
+        <table>
+          <thead>
+            <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th></tr>
+          </thead>
+          <tbody>
+          <?php foreach ($items as $it): ?>
+            <tr>
+              <td><?= e($it['nombre']) ?></td>
+              <td><?= (float)$it['cant'] ?></td>
+              <td><?= e($it['unidad']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php if (!empty($order['observaciones'])): ?>
+      <div class="remito-obs">
+        <strong>Notas:</strong> <?= nl2br(e($order['observaciones'])) ?>
+      </div>
+      <?php endif; ?>
+      <div class="remito-footer">
+        Remito generado automáticamente - Universal Fitness
+      </div>
+    </div>
+    `;
+  }
+  grid.innerHTML = html;
+}
+document.getElementById('inputTransporte').addEventListener('input', renderRemitos);
+document.getElementById('inputBultos').addEventListener('input', renderRemitos);
+window.onload = renderRemitos;
+</script>
 </body>
 </html>
