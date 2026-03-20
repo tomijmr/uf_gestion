@@ -173,6 +173,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     unset($it);
   }
 
+  // Manejar descuento
+  if ($action === 'set_discount') {
+    $P['descuento_pct'] = isset($_POST['descuento_pct']) ? (float)$_POST['descuento_pct'] : 0;
+    $P['descuento_monto'] = isset($_POST['descuento_monto']) ? (float)$_POST['descuento_monto'] : 0;
+  }
+
   if ($action === 'save_order' || $action === 'convert_to_order') {
     $convertToOrder = ($action === 'convert_to_order');
     
