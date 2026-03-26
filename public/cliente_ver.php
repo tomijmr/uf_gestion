@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
 }
 
 // --- Guardar (alta o edición) ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'recalcular_saldo') {
     $data = [
         'nombre' => trim($_POST['nombre'] ?? ''),
         'gym' => trim($_POST['gym'] ?? ''),

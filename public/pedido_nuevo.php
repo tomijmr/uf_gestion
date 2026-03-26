@@ -290,6 +290,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // --- NUEVA ACCIÓN: GUARDAR PRESUPUESTO ---
   if (($_POST['action'] ?? '') === 'save_budget') {
+    // Leer machine_id del formulario si viene
+    $P['machine_id'] = isset($_POST['machine_id']) ? (int)$_POST['machine_id'] : null;
     $error = '';
     // Si no hay customer_id, debe haber cliente manual
     if (!$P['customer_id'] && empty($P['cliente_manual'])) {
@@ -313,10 +315,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $incluye_iva = $P['incluye_iva'] ?? 1;
 
         // Crear pedido con estado PRESUPUESTO
-        $sqlOrder = "INSERT INTO orders (customer_id, cliente_manual, cliente_manual_contacto, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, machine_id, cliente_manual, cliente_manual_contacto, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         db()->prepare($sqlOrder)->execute([
-          $P['customer_id'], 
+          $P['customer_id'],
+          $P['machine_id'] ?? null,
           $P['cliente_manual'] ?: null, 
           $P['cliente_manual_contacto'] ?: null, 
           date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'PRESUPUESTO',
