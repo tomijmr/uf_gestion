@@ -1,5 +1,11 @@
-// --- Exportar pedido en formato PDF (igual a presupuesto, pero título 'Pedido') ---
-if (isset($_GET['export_pedido'])) {
+<?php
+// Mostrar errores para debug
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+?>
+
+<?php if (isset($_GET['export_pedido'])) {
   $order_id = (int)($_GET['order_id'] ?? 0);
   $logo = url('favicon-96x96.png');
   $fecha = date('d/m/Y H:i');
@@ -139,8 +145,9 @@ if (isset($_GET['export_pedido'])) {
     </div>
   </body>
   </html>
-  <?php exit; }
-<?php
+  <?php exit; } ?>
+
+  <?php
 // Mostrar errores para debug
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
