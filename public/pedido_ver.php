@@ -45,6 +45,7 @@ $items = $items->fetchAll();
         </tbody>
     </table>
     <a href="pedidos_compra.php" class="btn btn-secondary">Volver</a>
+    <button onclick="window.print()" class="btn btn-primary ms-2">Imprimir PDF</button>
 </div>
 </body>
 </html>
