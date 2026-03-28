@@ -352,6 +352,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedidos.php') ?>">Volver</a>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedido_editar.php?order_id=' . (int)$order_id . '&reset=1') ?>">Restablecer</a>
+      <button onclick="window.print()" class="btn btn-primary btn-sm ms-2">Imprimir PDF</button>
     </div>
   </div>
 
