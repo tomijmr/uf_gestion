@@ -5,7 +5,9 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 ?>
 
-<?php if (isset($_GET['export_pedido'])) {
+<?php
+require_once __DIR__ . '/../app/helpers.php';
+if (isset($_GET['export_pedido'])) {
   $order_id = (int)($_GET['order_id'] ?? 0);
   $logo = url('favicon-96x96.png');
   $fecha = date('d/m/Y H:i');
