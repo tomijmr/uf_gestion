@@ -34,7 +34,7 @@ if (isset($_GET['export_pedido'])) {
                               WHERE oi.order_id = ?");
   $itemsStmt->execute([$order_id]);
   $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-  $incluye_iva = (int)($order['incluye_iva'] ?? 1);
+  $incluye_iva = isset($_GET['incluye_iva']) ? (int)$_GET['incluye_iva'] : 1;
   $iva_pct = 0.21;
   $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
   $total_con_iva = (float)$order['total_neto'] + $iva_monto;
@@ -129,8 +129,10 @@ if (isset($_GET['export_pedido'])) {
         <div><span>Subtotal</span><strong><?= money($order['total_bruto']) ?></strong></div>
         <div><span>Descuento</span><strong><?= money($order['descuento']) ?></strong></div>
         <div><span>Total Neto</span><strong><?= money($order['total_neto']) ?></strong></div>
+        <?php if ($incluye_iva): ?>
         <div><span>IVA (21%)</span><strong><?= money($iva_monto) ?></strong></div>
         <div><span>Total con IVA</span><strong><?= money($total_con_iva) ?></strong></div>
+        <?php endif; ?>
         <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
         <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
       </div>
@@ -508,7 +510,22 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedidos.php') ?>">Volver</a>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedido_editar.php?order_id=' . (int)$order_id . '&reset=1') ?>">Restablecer</a>
-      <a href="pedido_editar.php?order_id=<?= (int)$order_id ?>&export_pedido=1" target="_blank" class="btn btn-primary btn-sm ms-2">Exportar PDF</a>
+      <form id="exportPDFForm" action="pedido_editar.php" method="get" target="_blank" style="display:inline;">
+        <input type="hidden" name="order_id" value="<?= (int)$order_id ?>">
+        <input type="hidden" name="export_pedido" value="1">
+        <input type="hidden" id="incluye_iva_input" name="incluye_iva" value="1">
+        <button type="submit" class="btn btn-primary btn-sm ms-2">Exportar PDF</button>
+      </form>
+      <div class="form-check form-check-inline ms-2">
+        <input class="form-check-input" type="checkbox" id="incluyeIvaCheck" checked>
+        <label class="form-check-label" for="incluyeIvaCheck">Incluir IVA</label>
+      </div>
+      <script>
+        // Sincroniza el valor del checkbox con el input oculto
+        document.getElementById('incluyeIvaCheck').addEventListener('change', function() {
+          document.getElementById('incluye_iva_input').value = this.checked ? '1' : '0';
+        });
+      </script>
     </div>
   </div>
 
