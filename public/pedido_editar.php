@@ -1,3 +1,145 @@
+// --- Exportar pedido en formato PDF (igual a presupuesto, pero título 'Pedido') ---
+if (isset($_GET['export_pedido'])) {
+  $order_id = (int)($_GET['order_id'] ?? 0);
+  $logo = url('favicon-96x96.png');
+  $fecha = date('d/m/Y H:i');
+  $stmt = db()->prepare("SELECT o.*, c.nombre AS cliente_nombre, c.cuit_dni, c.telefono
+                         FROM orders o
+                         LEFT JOIN customers c ON c.id = o.customer_id
+                         WHERE o.id = ?");
+  $stmt->execute([$order_id]);
+  $order = $stmt->fetch(PDO::FETCH_ASSOC);
+  if (!$order) {
+    http_response_code(404);
+    echo "<h1>No encontrado</h1><p>El pedido #{$order_id} no existe.</p>";
+    exit;
+  }
+  if (!$order['customer_id'] && !empty($order['cliente_manual'])) {
+      $order['cliente_nombre'] = $order['cliente_manual'];
+      $order['telefono'] = $order['cliente_manual_contacto'] ?: '-';
+      $order['cuit_dni'] = '-';
+  }
+  $itemsStmt = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre, p.metros_cuadrados, p.video_url
+                              FROM order_items oi
+                              JOIN products p ON p.id = oi.product_id
+                              WHERE oi.order_id = ?");
+  $itemsStmt->execute([$order_id]);
+  $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+  $incluye_iva = (int)($order['incluye_iva'] ?? 1);
+  $iva_pct = 0.21;
+  $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
+  $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+  ?>
+  <!doctype html>
+  <html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pedido #<?= (int)$order_id ?></title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #222; margin: 24px; }
+      .header { display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #0d6efd; padding-bottom: 12px; }
+      .header img { width: 48px; height: 48px; }
+      .title { font-size: 20px; font-weight: bold; }
+      .sub { color: #555; }
+      .section { margin-top: 16px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+      th { background: #f6f6f6; }
+      .text-end { text-align: right; }
+      .totals { margin-top: 12px; float: right; min-width: 260px; }
+      .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+      .badge { display: inline-block; padding: 4px 8px; background: #0d6efd; color: #fff; border-radius: 4px; font-size: 12px; }
+      .print { margin-top: 16px; }
+      @media print { .print { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <img src="<?= e($logo) ?>" alt="Logo">
+      <div>
+        <div class="title">Pedido</div>
+        <div class="sub">Universal Fitness SA</div>
+      </div>
+      <div style="margin-left:auto; text-align:right;">
+        <div class="badge">#<?= (int)$order_id ?></div>
+        <div class="sub"><?= e($fecha) ?></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <strong>Cliente:</strong> <?= e($order['cliente_nombre']) ?><br>
+      <strong>CUIT/DNI:</strong> <?= e($order['cuit_dni']) ?><br>
+      <strong>Teléfono:</strong> <?= e($order['telefono']) ?>
+    </div>
+
+    <div class="section">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Producto</th>
+            <th class="text-end">m² Total</th>
+            <th class="text-end">Cantidad</th>
+            <th class="text-end">Precio</th>
+            <th class="text-end">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php $total_m2 = 0; ?>
+          <?php foreach ($items as $it): 
+            $m2 = (float)($it['metros_cuadrados'] ?? 0);
+            $cant = (float)$it['cant'];
+            $row_m2 = $m2 * $cant;
+            $total_m2 += $row_m2;
+          ?>
+            <tr>
+              <td><?= e($it['codigo']) ?></td>
+              <td>
+                <?= e($it['nombre']) ?>
+                <?php if ($m2 > 0): ?><div style="font-size:11px; color:#666;">(<?= $m2 ?> m²/u)</div><?php endif; ?>
+                <?php if (!empty($it['video_url'])): ?>
+                   <div style="margin-top:2px;">
+                     <a href="<?= e($it['video_url']) ?>" target="_blank" style="font-size:12px; color:#d32f2f; text-decoration:none;">
+                       ▶ Ver Video
+                     </a>
+                   </div>
+                <?php endif; ?>
+              </td>
+              <td class="text-end"><?= $row_m2 > 0 ? number_format($row_m2, 4) : '-' ?></td>
+              <td class="text-end"><?= $cant ?></td>
+              <td class="text-end"><?= money($it['precio_unit']) ?></td>
+              <td class="text-end"><?= money($it['subtotal']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div style="border-bottom: 1px solid #eee; margin-bottom: 5px;"><span>m² Total</span><strong><?= number_format($total_m2, 0) ?></strong></div>
+        <div><span>Subtotal</span><strong><?= money($order['total_bruto']) ?></strong></div>
+        <div><span>Descuento</span><strong><?= money($order['descuento']) ?></strong></div>
+        <div><span>Total Neto</span><strong><?= money($order['total_neto']) ?></strong></div>
+        <div><span>IVA (21%)</span><strong><?= money($iva_monto) ?></strong></div>
+        <div><span>Total con IVA</span><strong><?= money($total_con_iva) ?></strong></div>
+        <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
+        <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
+      </div>
+      <div style="clear: both;"></div>
+    </div>
+
+    <?php if (!empty($order['observaciones'])): ?>
+      <div class="section">
+        <strong>Observaciones:</strong> <?= e($order['observaciones']) ?>
+      </div>
+    <?php endif; ?>
+
+    <div class="print">
+      <button onclick="window.print()">Imprimir / Guardar PDF</button>
+    </div>
+  </body>
+  </html>
+  <?php exit; }
 <?php
 require_once __DIR__ . '/../app/auth.php';
 require_login();
@@ -352,7 +494,7 @@ include __DIR__ . '/../views/partials/navbar.php';
     <div>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedidos.php') ?>">Volver</a>
       <a class="btn btn-outline-secondary btn-sm" href="<?= url('pedido_editar.php?order_id=' . (int)$order_id . '&reset=1') ?>">Restablecer</a>
-      <button onclick="window.print()" class="btn btn-primary btn-sm ms-2">Imprimir PDF</button>
+      <a href="pedido_editar.php?order_id=<?= (int)$order_id ?>&export_pedido=1" target="_blank" class="btn btn-primary btn-sm ms-2">Exportar PDF</a>
     </div>
   </div>
 
