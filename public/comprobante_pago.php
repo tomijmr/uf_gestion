@@ -125,8 +125,7 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
             </div>
         <?php elseif ($saldo_actual < 0): ?>
             <div style="text-align: right; margin-top: 10px; font-size: 14px; font-weight: bold; color: #198754;">
-                Saldo a Favor:  $661.800
-            <?##= money(abs($saldo_actual)) ?>
+                Saldo a Favor: <?= money(abs($saldo_actual)) ?>
             </div>
         <?php else: ?>
             <div style="text-align: right; margin-top: 10px; font-size: 14px; font-weight: bold; color: #198754;">
