@@ -65,8 +65,8 @@ $MENU = [
   ],
 
   // Empleados (Solo)
-  ['label' => 'Empleados', 'href' => url('empleados.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
-  ['label' => 'Empleados2', 'href' => url('empleados2.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
+  // ['label' => 'Empleados', 'href' => url('empleados.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
+  ['label' => 'Empleados', 'href' => url('empleados2.php'), 'roles' => ['ADMIN','CAJA','RRHH']],
 
   // Nuevo: Reportes Agrupados
   [
