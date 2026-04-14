@@ -26,6 +26,25 @@ for ($i = 0; $i < 7; $i++) {
     $days[] = $d;
 }
 
+$attendanceCols = [];
+try {
+  $cols = db()->query("SHOW COLUMNS FROM employee_attendance")->fetchAll();
+  foreach ($cols as $c) {
+    $attendanceCols[(string)$c['Field']] = true;
+  }
+} catch (Throwable $e) {
+  $attendanceCols = [];
+}
+
+$hasIngresoManana = isset($attendanceCols['ingreso_manana']);
+$hasIngresoTarde = isset($attendanceCols['ingreso_tarde']);
+$hasHorasTrabajadas = isset($attendanceCols['horas_trabajadas']);
+$hasHorasExtras = isset($attendanceCols['horas_extras']);
+$hasTurno = isset($attendanceCols['turno']);
+$hasHorarioEntrada = isset($attendanceCols['horario_entrada']);
+$hasHoraEntrada = isset($attendanceCols['hora_entrada']);
+$hasHoraSalida = isset($attendanceCols['hora_salida']);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -67,30 +86,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$turno_manana && $turno_tarde) $turno = 'TARDE';
             $horario_entrada = $turno_manana ? '08:00' : ($turno_tarde ? '13:00' : null);
 
-            db()->prepare("INSERT INTO employee_attendance
-                (employee_id, fecha, ingreso_manana, ingreso_tarde, horas_extras, horas_trabajadas, presente, justificado, notas, turno, horario_entrada)
-                VALUES (?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                ingreso_manana=VALUES(ingreso_manana),
-                ingreso_tarde=VALUES(ingreso_tarde),
-                horas_extras=0,
-                horas_trabajadas=VALUES(horas_trabajadas),
-                presente=VALUES(presente),
-                justificado=0,
-                notas=VALUES(notas),
-                turno=VALUES(turno),
-                horario_entrada=VALUES(horario_entrada)")
-                ->execute([
-                    $employee_id,
-                    $fecha,
-                    $ingreso_manana,
-                    $ingreso_tarde,
-                    $horas_trabajadas,
-                    $presente,
-                    $notas ?: null,
-                    $turno,
-                    $horario_entrada
-                ]);
+            $insertCols = ['employee_id', 'fecha', 'presente', 'justificado', 'notas'];
+            $insertVals = [$employee_id, $fecha, $presente, 0, $notas ?: null];
+
+            if ($hasIngresoManana) {
+              $insertCols[] = 'ingreso_manana';
+              $insertVals[] = $ingreso_manana;
+            }
+            if ($hasIngresoTarde) {
+              $insertCols[] = 'ingreso_tarde';
+              $insertVals[] = $ingreso_tarde;
+            }
+            if ($hasHorasExtras) {
+              $insertCols[] = 'horas_extras';
+              $insertVals[] = 0;
+            }
+            if ($hasHorasTrabajadas) {
+              $insertCols[] = 'horas_trabajadas';
+              $insertVals[] = $horas_trabajadas;
+            }
+            if ($hasTurno) {
+              $insertCols[] = 'turno';
+              $insertVals[] = $turno;
+            }
+            if ($hasHorarioEntrada) {
+              $insertCols[] = 'horario_entrada';
+              $insertVals[] = $horario_entrada;
+            }
+            if ($hasHoraEntrada) {
+              $insertCols[] = 'hora_entrada';
+              $insertVals[] = $horario_entrada ? ($horario_entrada . ':00') : null;
+            }
+            if ($hasHoraSalida) {
+              $horaSalida = null;
+              if ($turno_manana && $turno_tarde) $horaSalida = '17:00:00';
+              elseif ($turno_manana) $horaSalida = '12:00:00';
+              elseif ($turno_tarde) $horaSalida = '17:00:00';
+              $insertCols[] = 'hora_salida';
+              $insertVals[] = $horaSalida;
+            }
+
+            $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
+            $updates = [];
+            foreach ($insertCols as $col) {
+              if ($col === 'employee_id' || $col === 'fecha') continue;
+              $updates[] = $col . '=VALUES(' . $col . ')';
+            }
+
+            $sqlAttendance = 'INSERT INTO employee_attendance (' . implode(', ', $insertCols) . ') '
+              . 'VALUES (' . $placeholders . ') '
+              . 'ON DUPLICATE KEY UPDATE ' . implode(', ', $updates);
+
+            db()->prepare($sqlAttendance)->execute($insertVals);
 
             $flash_ok = 'Asistencia guardada.';
         } catch (Throwable $e) {
@@ -179,8 +226,17 @@ $weeklySummary = [];
 foreach ($employees as $e) {
     $eid = (int)$e['id'];
 
-    $stmtA = db()->prepare("SELECT fecha, ingreso_manana, ingreso_tarde, horas_trabajadas, notas
-                            FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+  $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
+  $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
+  $selHorasTrabajadas = $hasHorasTrabajadas ? 'horas_trabajadas' :
+    (($hasIngresoManana || $hasIngresoTarde)
+      ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END)) AS horas_trabajadas"
+      : (($hasHoraEntrada && $hasHoraSalida)
+        ? "(CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) AS horas_trabajadas"
+        : '(CASE WHEN presente=1 THEN 8 ELSE 0 END) AS horas_trabajadas'));
+
+  $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasTrabajadas, notas
+              FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
     $stmtA->execute([$eid, $week_start, $week_end]);
     $rowsA = $stmtA->fetchAll();
 
@@ -189,8 +245,16 @@ foreach ($employees as $e) {
         $attendanceMap[$eid][$ra['fecha']] = $ra;
     }
 
-    $stmtH = db()->prepare("SELECT COALESCE(SUM(horas_trabajadas),0) FROM employee_attendance
-                            WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+    $hoursExpr = $hasHorasTrabajadas
+      ? 'COALESCE(horas_trabajadas,0)'
+      : (($hasIngresoManana || $hasIngresoTarde)
+        ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END))"
+        : (($hasHoraEntrada && $hasHoraSalida)
+          ? "(CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END)"
+          : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)'));
+
+    $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExpr),0) FROM employee_attendance
+                WHERE employee_id=? AND fecha BETWEEN ? AND ?");
     $stmtH->execute([$eid, $week_start, $week_end]);
     $hours = (float)$stmtH->fetchColumn();
 
