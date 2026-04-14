@@ -70,6 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fecha = trim($_POST['fecha'] ?? '');
         $turno_manana = isset($_POST['turno_manana']) ? 1 : 0;
         $turno_tarde = isset($_POST['turno_tarde']) ? 1 : 0;
+      $horas_extras = max(0, (float)($_POST['horas_extras'] ?? 0));
         $notas = trim($_POST['notas'] ?? '');
 
         try {
@@ -79,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ingreso_manana = $turno_manana ? '08:00:00' : null;
             $ingreso_tarde = $turno_tarde ? '13:00:00' : null;
             $presente = ($turno_manana || $turno_tarde) ? 1 : 0;
-            $horas_trabajadas = ($turno_manana ? 4 : 0) + ($turno_tarde ? 4 : 0);
+            $horas_trabajadas = ($turno_manana ? 4 : 0) + ($turno_tarde ? 4 : 0) + $horas_extras;
             $turno = 'AUSENTE';
             if ($turno_manana && $turno_tarde) $turno = 'COMPLETO';
             if ($turno_manana && !$turno_tarde) $turno = 'MANANA';
@@ -99,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($hasHorasExtras) {
               $insertCols[] = 'horas_extras';
-              $insertVals[] = 0;
+              $insertVals[] = $horas_extras;
             }
             if ($hasHorasTrabajadas) {
               $insertCols[] = 'horas_trabajadas';
@@ -228,14 +229,15 @@ foreach ($employees as $e) {
 
   $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
   $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
+  $selHorasExtras = $hasHorasExtras ? 'horas_extras' : '0 AS horas_extras';
   $selHorasTrabajadas = $hasHorasTrabajadas ? 'horas_trabajadas' :
     (($hasIngresoManana || $hasIngresoTarde)
-      ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END)) AS horas_trabajadas"
+      ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
       : (($hasHoraEntrada && $hasHoraSalida)
-        ? "(CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) AS horas_trabajadas"
+        ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
         : '(CASE WHEN presente=1 THEN 8 ELSE 0 END) AS horas_trabajadas'));
 
-  $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasTrabajadas, notas
+  $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasExtras, $selHorasTrabajadas, notas
               FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
     $stmtA->execute([$eid, $week_start, $week_end]);
     $rowsA = $stmtA->fetchAll();
@@ -248,10 +250,16 @@ foreach ($employees as $e) {
     $hoursExpr = $hasHorasTrabajadas
       ? 'COALESCE(horas_trabajadas,0)'
       : (($hasIngresoManana || $hasIngresoTarde)
-        ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END))"
+        ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
         : (($hasHoraEntrada && $hasHoraSalida)
-          ? "(CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END)"
+          ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
           : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)'));
+
+    $extraExpr = $hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0';
+    $stmtExtra = db()->prepare("SELECT COALESCE(SUM($extraExpr),0) FROM employee_attendance
+                  WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+    $stmtExtra->execute([$eid, $week_start, $week_end]);
+    $extras = (float)$stmtExtra->fetchColumn();
 
     $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExpr),0) FROM employee_attendance
                 WHERE employee_id=? AND fecha BETWEEN ? AND ?");
@@ -268,6 +276,7 @@ foreach ($employees as $e) {
 
     $weeklySummary[$eid] = [
         'hours' => $hours,
+      'extras' => $extras,
         'rate' => $rate,
         'gross' => $gross,
         'paid' => $paid,
@@ -339,6 +348,10 @@ include __DIR__ . '/../views/partials/navbar.php';
           <input type="checkbox" name="turno_tarde" value="1"> 13-17
         </div>
         <div class="col-md-2">
+          <label class="form-label">Horas extra</label>
+          <input type="number" step="0.25" min="0" name="horas_extras" class="form-control" value="0">
+        </div>
+        <div class="col-md-2">
           <label class="form-label">Notas</label>
           <input type="text" name="notas" class="form-control" placeholder="Opcional">
         </div>
@@ -361,6 +374,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               <?php foreach ($days as $d): ?>
                 <th class="text-center"><?= e(date('d/m', strtotime($d))) ?></th>
               <?php endforeach; ?>
+              <th class="text-end">H. extra</th>
               <th class="text-end">Horas</th>
               <th class="text-end">A liquidar</th>
               <th class="text-end">Pagado</th>
@@ -375,7 +389,7 @@ include __DIR__ . '/../views/partials/navbar.php';
               <?php foreach ($employees as $e): ?>
                 <?php
                   $eid = (int)$e['id'];
-                  $sum = $weeklySummary[$eid] ?? ['hours'=>0,'rate'=>0,'gross'=>0,'paid'=>0,'pending'=>0];
+                  $sum = $weeklySummary[$eid] ?? ['hours'=>0,'extras'=>0,'rate'=>0,'gross'=>0,'paid'=>0,'pending'=>0];
                   $disabled = ((int)$e['suspendido'] === 1 || (int)$e['en_licencia_medica'] === 1 || $sum['rate'] <= 0 || $sum['hours'] <= 0 || $sum['pending'] <= 0);
                 ?>
                 <tr>
@@ -400,9 +414,13 @@ include __DIR__ . '/../views/partials/navbar.php';
                       <?php else: ?>
                         <?= $a['ingreso_manana'] ? 'M' : '' ?><?= ($a['ingreso_manana'] && $a['ingreso_tarde']) ? '+' : '' ?><?= $a['ingreso_tarde'] ? 'T' : '' ?>
                         <div class="text-muted"><?= e(number_format((float)$a['horas_trabajadas'], 1, '.', '')) ?>h</div>
+                        <?php if ((float)($a['horas_extras'] ?? 0) > 0): ?>
+                          <div class="text-primary">+<?= e(number_format((float)$a['horas_extras'], 1, '.', '')) ?>h</div>
+                        <?php endif; ?>
                       <?php endif; ?>
                     </td>
                   <?php endforeach; ?>
+                  <td class="text-end text-primary fw-semibold"><?= e(number_format((float)$sum['extras'], 2, ',', '.')) ?></td>
                   <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours'], 2, ',', '.')) ?></td>
                   <td class="text-end"><?= e(money($sum['gross'])) ?></td>
                   <td class="text-end"><?= e(money($sum['paid'])) ?></td>
