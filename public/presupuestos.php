@@ -14,6 +14,31 @@ require_once __DIR__ . '/../app/db.php';
 // echo "DEBUG: After DB include<br>";
 require_once __DIR__ . '/../app/helpers.php';
 
+$flash_ok = '';
+$flash_err = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $action = $_POST['action'] ?? '';
+
+  if ($action === 'delete') {
+    $order_id = (int)($_POST['order_id'] ?? 0);
+    try {
+      if ($order_id <= 0) throw new Exception('Presupuesto inválido.');
+
+      $stmt = db()->prepare("SELECT estado FROM orders WHERE id=?");
+      $stmt->execute([$order_id]);
+      $estado = $stmt->fetchColumn();
+      if ($estado === false) throw new Exception('Presupuesto no encontrado.');
+      if ($estado !== 'PRESUPUESTO') throw new Exception('Ese registro no es un presupuesto. Eliminalo desde Pedidos.');
+
+      delete_order_or_fail($order_id);
+      $flash_ok = "Presupuesto #$order_id eliminado.";
+    } catch (Throwable $e) {
+      $flash_err = 'No se pudo eliminar el presupuesto: ' . $e->getMessage();
+    }
+  }
+}
+
 // ---------- Filtros y paginación ----------
 $fe_desde = trim($_GET['desde'] ?? '');
 $fe_hasta = trim($_GET['hasta'] ?? '');
@@ -105,6 +130,12 @@ include __DIR__ . '/../views/partials/navbar.php';
       <i class="bi bi-check-circle"></i> Acción realizada con éxito.
     </div>
   <?php endif; ?>
+  <?php if ($flash_ok): ?>
+    <div class="alert alert-success"><?= e($flash_ok) ?></div>
+  <?php endif; ?>
+  <?php if ($flash_err): ?>
+    <div class="alert alert-danger"><?= e($flash_err) ?></div>
+  <?php endif; ?>
 
   <!-- Filtros -->
   <div class="card mb-4 shadow-sm">
@@ -167,6 +198,11 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <a href="<?= url('pedido_nuevo.php?export_presupuesto=1&order_id=' . $o['id']) ?>" target="_blank" class="btn btn-sm btn-outline-secondary" title="Imprimir PDF">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-printer" viewBox="0 0 16 16"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg> PDF
                 </a>
+                <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar el presupuesto #<?= (int)$o['id'] ?>? Esta acción no se puede deshacer.');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="order_id" value="<?= (int)$o['id'] ?>">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
+                </form>
               </td>
             </tr>
           <?php endforeach; ?>

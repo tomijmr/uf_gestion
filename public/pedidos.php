@@ -77,6 +77,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $flash_err = 'No se pudo entregar el pedido: ' . $e->getMessage();
     }
   }
+
+  if ($action === 'delete') {
+    $order_id = (int)($_POST['order_id'] ?? 0);
+    try {
+      if ($order_id <= 0) throw new Exception('Pedido inválido.');
+
+      $stmt = db()->prepare("SELECT estado FROM orders WHERE id=?");
+      $stmt->execute([$order_id]);
+      $estado = $stmt->fetchColumn();
+      if ($estado === false) throw new Exception('Pedido no encontrado.');
+      if ($estado === 'PRESUPUESTO') throw new Exception('Ese registro es un presupuesto. Eliminalo desde Presupuestos.');
+
+      delete_order_or_fail($order_id);
+      $flash_ok = "Pedido #$order_id eliminado.";
+    } catch (Throwable $e) {
+      $flash_err = 'No se pudo eliminar el pedido: ' . $e->getMessage();
+    }
+  }
 }
 
 // ---------- Filtros y paginación ----------
@@ -258,6 +276,11 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <?php if (!in_array($r['estado'], ['ENTREGADO','CERRADO'], true)): ?>
                     <a class="btn btn-sm btn-outline-primary" href="<?= url('pedido_editar.php?order_id=' . (int)$r['id']) ?>">Editar</a>
                   <?php endif; ?>
+                  <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar el pedido #<?= (int)$r['id'] ?>? Esta acción no se puede deshacer.');">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="order_id" value="<?= (int)$r['id'] ?>">
+                    <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+                  </form>
                   <?php if ($r['estado'] === 'LISTO_ENTREGA'): ?>
                     <form method="post" class="d-inline" onsubmit="return confirm('¿Entregar el pedido #<?= (int)$r['id'] ?>?');">
                       <input type="hidden" name="action" value="deliver">
