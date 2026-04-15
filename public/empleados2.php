@@ -216,6 +216,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash_err = 'No se pudo liquidar: ' . $e->getMessage();
         }
     }
+
+        if ($action === 'reset_week_hours') {
+          $employee_id = (int)($_POST['employee_id'] ?? 0);
+          try {
+            if ($employee_id <= 0) throw new Exception('Empleado invalido.');
+
+            $stmtEmp = db()->prepare("SELECT nombre, apellido FROM employees WHERE id=? LIMIT 1");
+            $stmtEmp->execute([$employee_id]);
+            $emp = $stmtEmp->fetch();
+            if (!$emp) throw new Exception('Empleado no encontrado.');
+
+            $stmtDel = db()->prepare("DELETE FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+            $stmtDel->execute([$employee_id, $week_start, $week_end]);
+            $deleted = (int)$stmtDel->rowCount();
+
+            $flash_ok = 'Semana reiniciada para ' . $emp['nombre'] . ' ' . $emp['apellido'] . '. Registros eliminados: ' . $deleted . '.';
+          } catch (Throwable $e) {
+            $flash_err = 'No se pudo resetear la semana: ' . $e->getMessage();
+          }
+        }
 }
 
 $employees = db()->query("SELECT id, nombre, apellido, pago_por_hora, suspendido, en_licencia_medica
@@ -443,6 +463,11 @@ include __DIR__ . '/../views/partials/navbar.php';
                       <div class="col-3 d-grid">
                         <button class="btn btn-sm btn-success" <?= $disabled ? 'disabled' : '' ?>>Pagar</button>
                       </div>
+                    </form>
+                    <form method="post" class="mt-1" onsubmit="return confirm('¿Resetear horas/asistencia de esta semana para este empleado?');">
+                      <input type="hidden" name="action" value="reset_week_hours">
+                      <input type="hidden" name="employee_id" value="<?= $eid ?>">
+                      <button class="btn btn-sm btn-outline-danger w-100" <?= ((float)$sum['hours'] <= 0) ? 'disabled' : '' ?>>Reset semana</button>
                     </form>
                   </td>
                 </tr>
