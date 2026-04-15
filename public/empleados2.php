@@ -230,12 +230,13 @@ foreach ($employees as $e) {
   $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
   $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
   $selHorasExtras = $hasHorasExtras ? 'horas_extras' : '0 AS horas_extras';
-  $selHorasTrabajadas = $hasHorasTrabajadas ? 'horas_trabajadas' :
-    (($hasIngresoManana || $hasIngresoTarde)
+  $selHorasTrabajadas = (($hasIngresoManana || $hasIngresoTarde)
       ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
       : (($hasHoraEntrada && $hasHoraSalida)
         ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
-        : '(CASE WHEN presente=1 THEN 8 ELSE 0 END) AS horas_trabajadas'));
+        : ($hasHorasTrabajadas
+          ? 'COALESCE(horas_trabajadas,0) AS horas_trabajadas'
+          : '(CASE WHEN presente=1 THEN 8 ELSE 0 END) AS horas_trabajadas')));
 
   $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasExtras, $selHorasTrabajadas, notas
               FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
@@ -247,13 +248,13 @@ foreach ($employees as $e) {
         $attendanceMap[$eid][$ra['fecha']] = $ra;
     }
 
-    $hoursExpr = $hasHorasTrabajadas
-      ? 'COALESCE(horas_trabajadas,0)'
-      : (($hasIngresoManana || $hasIngresoTarde)
+    $hoursExpr = (($hasIngresoManana || $hasIngresoTarde)
         ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
         : (($hasHoraEntrada && $hasHoraSalida)
           ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
-          : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)'));
+          : ($hasHorasTrabajadas
+            ? 'COALESCE(horas_trabajadas,0)'
+            : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)')));
 
     $extraExpr = $hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0';
     $stmtExtra = db()->prepare("SELECT COALESCE(SUM($extraExpr),0) FROM employee_attendance

@@ -8,6 +8,14 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+try {
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_installments TINYINT UNSIGNED DEFAULT NULL");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_total DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+} catch (Throwable $e) {
+  // No interrumpir el listado por compatibilidad de motor.
+}
+
 // ---------- Acciones (POST) ----------
 $flash_ok = '';
 $flash_err = '';
@@ -155,7 +163,7 @@ $total = (int)($st->fetch()['total'] ?? 0);
 $pages = max(1, (int)ceil($total / $limit));
 
 // Datos
-$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_neto, o.saldo, o.senia, o.observaciones, o.transporte_bonificado, o.empresa_transporte, COALESCE(c.nombre, o.cliente_manual) AS cliente
+$sql = "SELECT o.id, o.fecha, o.fecha_entrega, o.estado, o.total_bruto, o.descuento, o.total_neto, o.incluye_iva, o.saldo, o.senia, o.observaciones, o.transporte_bonificado, o.empresa_transporte, o.financing_enabled, o.financing_installments, o.financing_total, o.financing_base_amount, o.financing_surcharge_amount, o.financing_installment_amount, COALESCE(c.nombre, o.cliente_manual) AS cliente
         FROM orders o
         LEFT JOIN customers c ON c.id=o.customer_id
         $whereSql
@@ -171,6 +179,24 @@ function getItems(int $order_id): array {
                       FROM order_items oi
                       JOIN products p ON p.id=oi.product_id
                       WHERE oi.order_id=?");
+  $s->execute([$order_id]);
+  return $s->fetchAll();
+}
+
+function getFinancingInstallments(int $order_id): array {
+  $s = db()->prepare("SELECT installment_number, due_date, amount, paid_amount, status
+                      FROM order_financing_installments
+                      WHERE order_id=?
+                      ORDER BY installment_number");
+  $s->execute([$order_id]);
+  return $s->fetchAll();
+}
+
+function getOrderPayments(int $order_id): array {
+  $s = db()->prepare("SELECT fecha, medio, importe, referencia
+                      FROM payments
+                      WHERE order_id=?
+                      ORDER BY id DESC");
   $s->execute([$order_id]);
   return $s->fetchAll();
 }
@@ -262,6 +288,8 @@ include __DIR__ . '/../views/partials/navbar.php';
           <?php else: ?>
             <?php foreach ($rows as $r): ?>
               <?php $items = getItems((int)$r['id']); ?>
+              <?php $cuotas = ((int)($r['financing_enabled'] ?? 0) === 1) ? getFinancingInstallments((int)$r['id']) : []; ?>
+              <?php $payments = getOrderPayments((int)$r['id']); ?>
               <tr>
                 <td>#<?= (int)$r['id'] ?></td>
                 <td><?= e($r['fecha']) ?></td>
@@ -306,6 +334,14 @@ include __DIR__ . '/../views/partials/navbar.php';
                           <span class="badge <?= $r['transporte_bonificado'] ? 'bg-info' : 'bg-secondary' ?> ms-1">
                             <?= $r['transporte_bonificado'] ? 'Transporte bonificado' : 'Transporte no bonificado' ?>
                           </span>
+                          <?php if ((int)($r['financing_enabled'] ?? 0) === 1): ?>
+                            <span class="badge bg-warning text-dark ms-1">
+                              Financiado: <?= (int)$r['financing_installments'] ?> cuotas
+                            </span>
+                            <span class="badge bg-dark ms-1">
+                              Total fin.: <?= money($r['financing_total']) ?>
+                            </span>
+                          <?php endif; ?>
                           <?php if ($r['empresa_transporte']): ?>
                             <span class="badge bg-primary ms-1">
                               <?= e($r['empresa_transporte']) ?>
@@ -313,6 +349,27 @@ include __DIR__ . '/../views/partials/navbar.php';
                           <?php endif; ?>
                         </div>
                       </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                      <?php
+                        $iva_monto = ((int)($r['incluye_iva'] ?? 1) === 1) ? round((float)$r['total_neto'] * 0.21, 2) : 0.0;
+                        $total_con_iva = (float)$r['total_neto'] + $iva_monto;
+                        $saldo_base = max(0, $total_con_iva - (float)$r['senia']);
+                      ?>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Subtotal</div><div class="fw-semibold"><?= money($r['total_bruto']) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Descuento</div><div class="fw-semibold"><?= money($r['descuento']) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Total Neto</div><div class="fw-semibold"><?= money($r['total_neto']) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">IVA (21%)</div><div class="fw-semibold"><?= money($iva_monto) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Total con IVA</div><div class="fw-semibold"><?= money($total_con_iva) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Seña</div><div class="fw-semibold"><?= money($r['senia']) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Saldo base</div><div class="fw-semibold"><?= money($saldo_base) ?></div></div>
+                      <div class="col-md-3 col-6"><div class="small text-muted">Saldo actual</div><div class="fw-semibold"><?= money($r['saldo']) ?></div></div>
+                      <?php if ((int)($r['financing_enabled'] ?? 0) === 1): ?>
+                        <div class="col-md-3 col-6"><div class="small text-muted">Recargo 3%</div><div class="fw-semibold"><?= money($r['financing_surcharge_amount']) ?></div></div>
+                        <div class="col-md-3 col-6"><div class="small text-muted">Total financiado</div><div class="fw-semibold"><?= money($r['financing_total']) ?></div></div>
+                        <div class="col-md-3 col-6"><div class="small text-muted">Cuotas</div><div class="fw-semibold"><?= (int)$r['financing_installments'] ?></div></div>
+                        <div class="col-md-3 col-6"><div class="small text-muted">Valor cuota</div><div class="fw-semibold"><?= money($r['financing_installment_amount']) ?></div></div>
+                      <?php endif; ?>
                     </div>
                     <div class="table-responsive">
                       <table class="table table-sm mb-0">
@@ -340,6 +397,68 @@ include __DIR__ . '/../views/partials/navbar.php';
                         </tbody>
                       </table>
                     </div>
+
+                    <?php if ((int)($r['financing_enabled'] ?? 0) === 1): ?>
+                      <div class="mt-3">
+                        <div class="fw-semibold mb-2">Cronograma de financiación</div>
+                        <div class="table-responsive">
+                          <table class="table table-sm mb-0">
+                            <thead>
+                              <tr>
+                                <th>Cuota</th>
+                                <th>Vencimiento</th>
+                                <th class="text-end">Monto</th>
+                                <th class="text-end">Pagado</th>
+                                <th class="text-center">Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <?php if (!$cuotas): ?>
+                                <tr><td colspan="5" class="text-center text-muted">Sin cronograma cargado</td></tr>
+                              <?php else: ?>
+                                <?php foreach ($cuotas as $c): ?>
+                                  <tr>
+                                    <td>#<?= (int)$c['installment_number'] ?></td>
+                                    <td><?= e($c['due_date']) ?></td>
+                                    <td class="text-end"><?= money($c['amount']) ?></td>
+                                    <td class="text-end"><?= money($c['paid_amount']) ?></td>
+                                    <td class="text-center"><span class="badge bg-secondary"><?= e($c['status']) ?></span></td>
+                                  </tr>
+                                <?php endforeach; ?>
+                              <?php endif; ?>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    <?php endif; ?>
+
+                    <?php if ($payments): ?>
+                      <div class="mt-3">
+                        <div class="fw-semibold mb-2">Pagos registrados</div>
+                        <div class="table-responsive">
+                          <table class="table table-sm mb-0">
+                            <thead>
+                              <tr>
+                                <th>Fecha</th>
+                                <th>Medio</th>
+                                <th>Referencia</th>
+                                <th class="text-end">Importe</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <?php foreach ($payments as $p): ?>
+                                <tr>
+                                  <td><?= e($p['fecha']) ?></td>
+                                  <td><?= e($p['medio']) ?></td>
+                                  <td><?= e($p['referencia']) ?></td>
+                                  <td class="text-end"><?= money($p['importe']) ?></td>
+                                </tr>
+                              <?php endforeach; ?>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    <?php endif; ?>
 
                     <?php if (!empty($r['observaciones'])): ?>
                       <div class="mt-3 p-2 bg-warning bg-opacity-10 border border-warning rounded">

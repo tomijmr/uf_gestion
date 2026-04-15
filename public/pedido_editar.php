@@ -38,6 +38,12 @@ if (isset($_GET['export_pedido'])) {
   $iva_pct = 0.21;
   $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
   $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+  $saldo_base = max(0, $total_con_iva - (float)$order['senia']);
+  $fin_enabled = (int)($order['financing_enabled'] ?? 0) === 1;
+  $fin_recargo = $fin_enabled ? (float)($order['financing_surcharge_amount'] ?? round($saldo_base * 0.03, 2)) : 0.0;
+  $fin_total = $fin_enabled ? (float)($order['financing_total'] ?? ($saldo_base + $fin_recargo)) : $saldo_base;
+  $fin_cuotas = $fin_enabled ? (int)($order['financing_installments'] ?? 0) : 0;
+  $fin_cuota = $fin_enabled ? (float)($order['financing_installment_amount'] ?? ($fin_cuotas > 0 ? round($fin_total / $fin_cuotas, 2) : 0)) : 0.0;
   ?>
   <!doctype html>
   <html lang="es">
@@ -134,7 +140,14 @@ if (isset($_GET['export_pedido'])) {
         <div><span>Total con IVA</span><strong><?= money($total_con_iva) ?></strong></div>
         <?php endif; ?>
         <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
-        <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
+        <div><span>Saldo base</span><strong><?= money($saldo_base) ?></strong></div>
+        <?php if ($fin_enabled): ?>
+          <div><span>Recargo financiación (3%)</span><strong><?= money($fin_recargo) ?></strong></div>
+          <div><span>Total financiado</span><strong><?= money($fin_total) ?></strong></div>
+          <div><span><?= $fin_cuotas ?> cuotas</span><strong><?= money($fin_cuota) ?></strong></div>
+        <?php else: ?>
+          <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
+        <?php endif; ?>
       </div>
       <div style="clear: both;"></div>
     </div>
@@ -161,6 +174,30 @@ require_once __DIR__ . '/../app/auth.php';
 require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
+
+try {
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_installments TINYINT UNSIGNED DEFAULT NULL");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_base_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_surcharge_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_total DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_installment_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("CREATE TABLE IF NOT EXISTS order_financing_installments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    installment_number TINYINT UNSIGNED NOT NULL,
+    due_date DATE NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    status ENUM('PENDIENTE','PARCIAL','PAGADA') NOT NULL DEFAULT 'PENDIENTE',
+    payment_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_ofi_order (order_id),
+    INDEX idx_ofi_order_installment (order_id, installment_number)
+  )");
+} catch (Throwable $e) {
+  // Mantener compatibilidad en entornos sin soporte IF NOT EXISTS.
+}
 
 $order_id = (int)($_GET['order_id'] ?? 0);
 if ($order_id <= 0) {
@@ -194,6 +231,62 @@ function pedido_edit_total_bruto(array $items): float {
   $t = 0.0;
   foreach ($items as $it) $t += (float)$it['subtotal'];
   return $t;
+}
+
+function pedido_edit_calcular_financiacion(float $neto, float $senia, int $incluye_iva, int $cuotas, int $habilitada): array {
+  $iva = $incluye_iva ? round($neto * 0.21, 2) : 0.0;
+  $total_con_iva = round($neto + $iva, 2);
+  $saldo_base = max(0, round($total_con_iva - $senia, 2));
+
+  if (!$habilitada || $cuotas < 2 || $cuotas > 12 || $saldo_base <= 0) {
+    return [
+      'enabled' => 0,
+      'cuotas' => null,
+      'base' => $saldo_base,
+      'recargo' => 0.0,
+      'total' => $saldo_base,
+      'cuota' => 0.0,
+      'saldo_base' => $saldo_base,
+    ];
+  }
+
+  $recargo = round($saldo_base * 0.03, 2);
+  $total_financiado = round($saldo_base + $recargo, 2);
+  $cuota = round($total_financiado / $cuotas, 2);
+
+  return [
+    'enabled' => 1,
+    'cuotas' => $cuotas,
+    'base' => $saldo_base,
+    'recargo' => $recargo,
+    'total' => $total_financiado,
+    'cuota' => $cuota,
+    'saldo_base' => $saldo_base,
+  ];
+}
+
+function pedido_edit_guardar_cuotas_financiacion(int $order_id, array $f, string $fecha_base): void {
+  db()->prepare("DELETE FROM order_financing_installments WHERE order_id=?")->execute([$order_id]);
+  if ((int)$f['enabled'] !== 1 || (int)$f['cuotas'] < 2) {
+    return;
+  }
+
+  $cuotas = (int)$f['cuotas'];
+  $cuota_base = round((float)$f['total'] / $cuotas, 2);
+  $acumulado = 0.0;
+  $start = date('Y-m-d', strtotime($fecha_base . ' +30 days'));
+  $ins = db()->prepare("INSERT INTO order_financing_installments (order_id, installment_number, due_date, amount) VALUES (?,?,?,?)");
+
+  for ($n = 1; $n <= $cuotas; $n++) {
+    if ($n < $cuotas) {
+      $monto = $cuota_base;
+      $acumulado += $monto;
+    } else {
+      $monto = round((float)$f['total'] - $acumulado, 2);
+    }
+    $due = date('Y-m-d', strtotime($start . ' +' . ($n - 1) . ' month'));
+    $ins->execute([$order_id, $n, $due, $monto]);
+  }
 }
 
 $order = load_order($order_id);
@@ -410,7 +503,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $sqlGetProd = db()->prepare("SELECT id, tipo, stock_actual, stock_reservado FROM products WHERE id=? FOR UPDATE");
             $sqlUpdReserva = db()->prepare("UPDATE products SET stock_reservado = stock_reservado + ? WHERE id=?");
-            $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, cantidad, estado) VALUES (?,?,?,'PENDIENTE')");
+            $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, machine_id, cantidad, estado) VALUES (?,?,?,?, 'PENDIENTE')");
 
             foreach ($P['items'] as $it) {
               $pid = (int)$it['product_id'];
@@ -427,7 +520,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $faltante = $cant - $aReservar;
                 if ($faltante > 0) {
-                  $sqlOP->execute([$order_id, $pid, $faltante]);
+                  $sqlOP->execute([$order_id, $pid, $pid, $faltante]);
                   $estadoFinal = 'EN_PRODUCCION';
                 }
               }
@@ -438,12 +531,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $descuento = (float)$ord['descuento'];
         $total_neto = $total_bruto - $descuento;
         $senia = (float)$ord['senia'];
-        $saldo = max(0, $total_neto - $senia);
+        $fin = pedido_edit_calcular_financiacion(
+          $total_neto,
+          $senia,
+          (int)($ord['incluye_iva'] ?? 1),
+          (int)($ord['financing_installments'] ?? 2),
+          (int)($ord['financing_enabled'] ?? 0)
+        );
+        $saldo = $fin['enabled'] ? $fin['total'] : $fin['saldo_base'];
 
-        db()->prepare("UPDATE orders SET total_bruto=?, total_neto=?, saldo=?, estado=? WHERE id=?")
-          ->execute([$total_bruto, $total_neto, $saldo, $estadoFinal, $order_id]);
+        pedido_edit_guardar_cuotas_financiacion($order_id, $fin, date('Y-m-d'));
 
-        $diff = $total_neto - (float)$ord['total_neto'];
+        db()->prepare("UPDATE orders SET total_bruto=?, total_neto=?, saldo=?, estado=?, financing_enabled=?, financing_installments=?, financing_base_amount=?, financing_surcharge_amount=?, financing_total=?, financing_installment_amount=? WHERE id=?")
+          ->execute([
+            $total_bruto,
+            $total_neto,
+            $saldo,
+            $estadoFinal,
+            $fin['enabled'],
+            $fin['cuotas'],
+            $fin['base'],
+            $fin['recargo'],
+            $fin['total'],
+            $fin['cuota'],
+            $order_id,
+          ]);
+
+        $oldCargo = ((int)($ord['financing_enabled'] ?? 0) === 1)
+          ? ((float)($ord['financing_total'] ?? 0) + (float)$ord['senia'])
+          : (float)$ord['total_neto'];
+        $newCargo = ($fin['enabled'] ? ($fin['total'] + $senia) : $total_neto);
+        $diff = $newCargo - $oldCargo;
         
         // Ledger update - ONLY if valid customer
         if ($ord['customer_id']) {
@@ -454,11 +572,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                           FROM customer_ledger WHERE customer_id=?");
                  $stmtSaldo->execute([$cid]);
                  $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
-                 $saldoResult = $saldoAnterior + $total_neto;
+                 $saldoResult = $saldoAnterior + $newCargo;
                  
                  db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
                              VALUES (?,?,?,?,?,?,?,?)")
-                ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $total_neto, $saldoResult]);
+                ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $newCargo, $saldoResult]);
 
             } elseif (!$wasPresupuesto && !$isPresupuesto && abs($diff) > 0.00001) {
               $cid = (int)$ord['customer_id'];

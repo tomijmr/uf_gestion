@@ -65,6 +65,13 @@ if (isset($_GET['export_presupuesto'])) {
     $iva_pct = 0.21;
     $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
     $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+    $fin_export = calcular_financiacion(
+      (float)$order['total_neto'],
+      (float)$order['senia'],
+      $incluye_iva,
+      (int)($order['financing_installments'] ?? 2),
+      (int)($order['financing_enabled'] ?? 0)
+    );
   } else {
 
     $order = [
@@ -78,6 +85,8 @@ if (isset($_GET['export_presupuesto'])) {
       'saldo' => max(0, pedido_total_bruto($P['items'] ?? []) - (float)($P['senia'] ?? 0)),
       'observaciones' => trim($P['observaciones'] ?? ''),
       'incluye_iva' => (int)($P['incluye_iva'] ?? 1),
+      'financing_enabled' => (int)($P['financing_enabled'] ?? 0),
+      'financing_installments' => (int)($P['financing_installments'] ?? 2),
     ];
     $items = array_map(function ($it) {
       return [
@@ -106,6 +115,13 @@ if (isset($_GET['export_presupuesto'])) {
     $iva_pct = 0.21;
     $iva_monto = $incluye_iva ? ((float)$order['total_neto'] * $iva_pct) : 0;
     $total_con_iva = (float)$order['total_neto'] + $iva_monto;
+    $fin_export = calcular_financiacion(
+      (float)$order['total_neto'],
+      (float)$order['senia'],
+      $incluye_iva,
+      (int)($order['financing_installments'] ?? 2),
+      (int)($order['financing_enabled'] ?? 0)
+    );
   }
   ?>
   <!doctype html>
@@ -201,7 +217,14 @@ if (isset($_GET['export_presupuesto'])) {
         <div><span>IVA (21%)</span><strong><?= money($iva_monto) ?></strong></div>
         <div><span>Total con IVA</span><strong><?= money($total_con_iva) ?></strong></div>
         <div><span>Seña</span><strong><?= money($order['senia']) ?></strong></div>
-        <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
+        <div><span>Saldo base</span><strong><?= money($fin_export['saldo_base']) ?></strong></div>
+        <?php if ($fin_export['enabled']): ?>
+          <div><span>Recargo financiación (3%)</span><strong><?= money($fin_export['recargo']) ?></strong></div>
+          <div><span>Total financiado</span><strong><?= money($fin_export['total']) ?></strong></div>
+          <div><span><?= (int)$fin_export['cuotas'] ?> cuotas</span><strong><?= money($fin_export['cuota']) ?></strong></div>
+        <?php else: ?>
+          <div><span>Saldo</span><strong><?= money($incluye_iva ? ($total_con_iva - (float)$order['senia']) : $order['saldo']) ?></strong></div>
+        <?php endif; ?>
       </div>
       <div style="clear: both;"></div>
     </div>
@@ -225,6 +248,27 @@ if (isset($_GET['export_presupuesto'])) {
 try {
   db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS transporte_bonificado TINYINT(1) DEFAULT 0");
   db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS empresa_transporte VARCHAR(100) NULL");
+  db()->exec("ALTER TABLE orders MODIFY COLUMN machine_id INT NULL DEFAULT NULL");
+  db()->exec("ALTER TABLE orders MODIFY COLUMN created_by INT NOT NULL DEFAULT 1");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_installments TINYINT UNSIGNED DEFAULT NULL");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_base_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_surcharge_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_total DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS financing_installment_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+  db()->exec("CREATE TABLE IF NOT EXISTS order_financing_installments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    installment_number TINYINT UNSIGNED NOT NULL,
+    due_date DATE NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    status ENUM('PENDIENTE','PARCIAL','PAGADA') NOT NULL DEFAULT 'PENDIENTE',
+    payment_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_ofi_order (order_id),
+    INDEX idx_ofi_order_installment (order_id, installment_number)
+  )");
 } catch (Throwable $e) {
   // Silenciar errores de compatibilidad
 }
@@ -233,6 +277,7 @@ try {
 if (!isset($_SESSION['pedido'])) {
   $_SESSION['pedido'] = [
     'customer_id' => null,
+    'machine_id' => 0,
     'items' => [], // ['product_id','codigo','nombre','precio','cant','subtotal']
     'senia' => 0.0,
     'medio' => 'EFECTIVO',
@@ -245,6 +290,8 @@ if (!isset($_SESSION['pedido'])) {
     'fecha_entrega' => '',
     'dias_entrega' => '',
     'incluye_iva' => 1,
+    'financing_enabled' => 0,
+    'financing_installments' => 2,
     'type' => 'PEDIDO', // NEW: PEDIDO or PRESUPUESTO
     'cliente_manual' => '', // NEW: Para presupuestos manuales
     'cliente_manual_contacto' => '',
@@ -269,6 +316,85 @@ $P =& $_SESSION['pedido'];
 
 function pedido_total_bruto(array $items): float {
   $t = 0.0; foreach ($items as $it) $t += (float)$it['subtotal']; return $t;
+}
+
+function pedido_resolver_machine_id(array $pedido): int {
+  $mid = (int)($pedido['machine_id'] ?? 0);
+  if ($mid > 0) {
+    return $mid;
+  }
+  foreach (($pedido['items'] ?? []) as $it) {
+    $pid = (int)($it['product_id'] ?? 0);
+    if ($pid > 0) {
+      return $pid;
+    }
+  }
+  return 0;
+}
+
+function pedido_created_by(): int {
+  $u = function_exists('user') ? user() : null;
+  return (int)($u['id'] ?? 1);
+}
+
+function calcular_financiacion(float $neto, float $senia, int $incluye_iva, int $cuotas, int $habilitada): array {
+  $iva = $incluye_iva ? round($neto * 0.21, 2) : 0.0;
+  $total_con_iva = round($neto + $iva, 2);
+  $saldo_base = max(0, round($total_con_iva - $senia, 2));
+
+  if (!$habilitada || $cuotas < 2 || $cuotas > 12 || $saldo_base <= 0) {
+    return [
+      'enabled' => 0,
+      'cuotas' => null,
+      'base' => $saldo_base,
+      'recargo' => 0.0,
+      'total' => $saldo_base,
+      'cuota' => 0.0,
+      'iva' => $iva,
+      'total_con_iva' => $total_con_iva,
+      'saldo_base' => $saldo_base,
+    ];
+  }
+
+  $recargo = round($saldo_base * 0.03, 2);
+  $total_financiado = round($saldo_base + $recargo, 2);
+  $cuota_base = round($total_financiado / $cuotas, 2);
+
+  return [
+    'enabled' => 1,
+    'cuotas' => $cuotas,
+    'base' => $saldo_base,
+    'recargo' => $recargo,
+    'total' => $total_financiado,
+    'cuota' => $cuota_base,
+    'iva' => $iva,
+    'total_con_iva' => $total_con_iva,
+    'saldo_base' => $saldo_base,
+  ];
+}
+
+function guardar_cuotas_financiacion(int $order_id, array $f, string $fecha_operacion): void {
+  db()->prepare("DELETE FROM order_financing_installments WHERE order_id=?")->execute([$order_id]);
+  if ((int)$f['enabled'] !== 1 || (int)$f['cuotas'] < 2) {
+    return;
+  }
+
+  $cuotas = (int)$f['cuotas'];
+  $cuota_base = round((float)$f['total'] / $cuotas, 2);
+  $acumulado = 0.0;
+  $start = date('Y-m-d', strtotime($fecha_operacion . ' +30 days'));
+  $ins = db()->prepare("INSERT INTO order_financing_installments (order_id, installment_number, due_date, amount) VALUES (?,?,?,?)");
+
+  for ($n = 1; $n <= $cuotas; $n++) {
+    if ($n < $cuotas) {
+      $monto = $cuota_base;
+      $acumulado += $monto;
+    } else {
+      $monto = round((float)$f['total'] - $acumulado, 2);
+    }
+    $due = date('Y-m-d', strtotime($start . ' +' . ($n - 1) . ' month'));
+    $ins->execute([$order_id, $n, $due, $monto]);
+  }
 }
 
 $step = max(1, min(3, (int)($_GET['step'] ?? 1)));
@@ -310,21 +436,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $total_bruto = pedido_total_bruto($P['items']);
         $descuento   = round($total_bruto * $descuento_pct / 100, 2) + $descuento_monto;
         $total_neto  = max(0, $total_bruto - $descuento);
-        $senia       = 0; // Presupuestos no suelen tener seña, o sí? Asumamos 0 por ahora o la que pongan. 
-        $saldo       = max(0, $total_neto - $senia);
+        $senia       = max(0, (float)($P['senia'] ?? 0));
         $incluye_iva = $P['incluye_iva'] ?? 1;
+        $fin = calcular_financiacion(
+          $total_neto,
+          $senia,
+          (int)$incluye_iva,
+          (int)($P['financing_installments'] ?? 2),
+          (int)($P['financing_enabled'] ?? 0)
+        );
+        $saldo       = $fin['enabled'] ? $fin['total'] : $fin['saldo_base'];
+
+        $machine_id = pedido_resolver_machine_id($P);
+        $created_by = pedido_created_by();
 
         // Crear pedido con estado PRESUPUESTO
-        $sqlOrder = "INSERT INTO orders (customer_id, machine_id, cliente_manual, cliente_manual_contacto, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, machine_id, cliente_manual, cliente_manual_contacto, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, created_by, incluye_iva, financing_enabled, financing_installments, financing_base_amount, financing_surcharge_amount, financing_total, financing_installment_amount)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         db()->prepare($sqlOrder)->execute([
           $P['customer_id'],
-          $P['machine_id'] ?? null,
+          $machine_id,
           $P['cliente_manual'] ?: null, 
           $P['cliente_manual_contacto'] ?: null, 
           date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'PRESUPUESTO',
           $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
-          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $incluye_iva
+          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $created_by, $incluye_iva,
+          $fin['enabled'], $fin['cuotas'], $fin['base'], $fin['recargo'], $fin['total'], $fin['cuota']
         ]);
         $order_id = (int)db()->lastInsertId();
 
@@ -334,6 +471,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($P['items'] as $it) {
           $stmtItem->execute([$order_id, $it['product_id'], $it['cant'], $it['precio'], $it['subtotal']]);
         }
+
+        guardar_cuotas_financiacion($order_id, $fin, date('Y-m-d'));
 
         db()->commit();
         unset($_SESSION['pedido']);
@@ -363,6 +502,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($prod['tipo'] !== 'PT') {
         $error = "Solo se pueden vender productos terminados (PT).";
       } else {
+        if (empty($P['machine_id'])) {
+          $P['machine_id'] = (int)$prod['id'];
+        }
         $precio = (float)$prod['precio_std'];
         $subtotal = $precio * $cant;
         $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
@@ -407,6 +549,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($prod['tipo'] !== 'PT') {
           $error = "El código ingresado no corresponde a un producto terminado (PT).";
         } else {
+          if (empty($P['machine_id'])) {
+            $P['machine_id'] = (int)$prod['id'];
+          }
           $precio = (float)$prod['precio_std'];
           $subtotal = $precio * $cant;
           $metros_cuadrados = (float)($prod['metros_cuadrados'] ?? 0);
@@ -477,6 +622,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $P['dias_entrega'] = trim($_POST['dias_entrega'] ?? '');
     $P['fecha_entrega'] = trim($_POST['fecha_entrega'] ?? '');
     $P['incluye_iva'] = isset($_POST['incluye_iva']) ? 1 : 0;
+    $P['financing_enabled'] = isset($_POST['financing_enabled']) ? 1 : 0;
+    $P['financing_installments'] = max(2, min(12, (int)($_POST['financing_installments'] ?? 2)));
     
     // Calcular fecha de entrega si se eligió días
     if ($P['dias_entrega'] !== '' && $P['dias_entrega'] !== 'manual') {
@@ -529,8 +676,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   // Confirmar pedido
   if (($_POST['action'] ?? '') === 'confirm_order') {
     $error = '';
-    if (!$P['customer_id']) $error = 'Debes seleccionar un cliente.';
-    if (empty($P['items'])) $error = 'El pedido no tiene ítems.';
+    $debug_step = 'inicio_confirm_order';
+    $order_id_ctx = (int)($_GET['order_id'] ?? 0);
+    if (empty($P['items']) && $order_id_ctx > 0) {
+      $error = 'El pedido ya fue confirmado. No se puede confirmar nuevamente desde esta vista.';
+      $step = 3;
+    }
+    if (empty($error) && !$P['customer_id']) $error = 'Debes seleccionar un cliente.';
+    if (empty($error) && empty($P['items'])) $error = 'El pedido no tiene ítems.';
 
     if (empty($error)) {
       try {
@@ -540,31 +693,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $descuento   = 0.0;
         $total_neto  = $total_bruto - $descuento;
         $senia       = $P['senia'];
-        $saldo       = max(0, $total_neto - $senia);
         $incluye_iva = $P['incluye_iva'] ?? 1;
+        $fin = calcular_financiacion(
+          $total_neto,
+          $senia,
+          (int)$incluye_iva,
+          (int)($P['financing_installments'] ?? 2),
+          (int)($P['financing_enabled'] ?? 0)
+        );
+        $saldo       = $fin['enabled'] ? $fin['total'] : $fin['saldo_base'];
+
+        $machine_id = pedido_resolver_machine_id($P);
+        $created_by = pedido_created_by();
 
         // Crear pedido
-        $sqlOrder = "INSERT INTO orders (customer_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, incluye_iva)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        $sqlOrder = "INSERT INTO orders (customer_id, machine_id, fecha, fecha_entrega, estado, total_bruto, descuento, total_neto, senia, saldo, observaciones, transporte_bonificado, empresa_transporte, created_by, incluye_iva, financing_enabled, financing_installments, financing_base_amount, financing_surcharge_amount, financing_total, financing_installment_amount)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        $debug_step = 'insert_orders_confirm';
         db()->prepare($sqlOrder)->execute([
-          $P['customer_id'], date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'CONFIRMADO',
+          $P['customer_id'], $machine_id, date('Y-m-d H:i:s'), $P['fecha_entrega'] ?: null, 'CONFIRMADO',
           $total_bruto, $descuento, $total_neto, $senia, $saldo, $P['observaciones'],
-          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $incluye_iva
+          $P['transporte_bonificado'], $P['empresa_transporte'] ?: null, $created_by, $incluye_iva,
+          $fin['enabled'], $fin['cuotas'], $fin['base'], $fin['recargo'], $fin['total'], $fin['cuota']
         ]);
         $order_id = (int)db()->lastInsertId();
 
         // Ítems
         $sqlItem = "INSERT INTO order_items (order_id, product_id, cant, precio_unit, subtotal) VALUES (?,?,?,?,?)";
         $stmtItem = db()->prepare($sqlItem);
+        $debug_step = 'insert_order_items';
         foreach ($P['items'] as $it) {
           $stmtItem->execute([$order_id, $it['product_id'], $it['cant'], $it['precio'], $it['subtotal']]);
         }
+
+        $debug_step = 'insert_financing_installments';
+        guardar_cuotas_financiacion($order_id, $fin, date('Y-m-d'));
 
         // Reservas y OP
         $estadoFinal = 'LISTO_ENTREGA';
         $sqlGetProd = db()->prepare("SELECT id, tipo, stock_actual, stock_reservado FROM products WHERE id=? FOR UPDATE");
         $sqlUpdReserva = db()->prepare("UPDATE products SET stock_reservado = stock_reservado + ? WHERE id=?");
-        $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, cantidad, estado) VALUES (?,?,?,'PENDIENTE')");
+        $sqlOP = db()->prepare("INSERT INTO production_orders (order_id, product_pt_id, machine_id, cantidad, estado) VALUES (?,?,?,?, 'PENDIENTE')");
 
         foreach ($P['items'] as $it) {
           $pid = (int)$it['product_id'];
@@ -581,7 +750,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $faltante = $cant - $aReservar;
             if ($faltante > 0) {
-              $sqlOP->execute([$order_id, $pid, $faltante]);
+              $sqlOP->execute([$order_id, $pid, $pid, $faltante]);
               $estadoFinal = 'EN_PRODUCCION';
             }
           }
@@ -596,25 +765,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmtSaldo->execute([$cid]);
         $saldoAnterior = (float)($stmtSaldo->fetch()['saldo'] ?? 0);
 
-        $saldoResult = $saldoAnterior + $total_neto;
+        $montoCargo = $fin['enabled'] ? ($fin['total'] + $senia) : $total_neto;
+        $saldoResult = $saldoAnterior + $montoCargo;
+        $debug_step = 'insert_customer_ledger_cargo';
         db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
                        VALUES (?,?,?,?,?,?,?,?)")
-          ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $total_neto, $saldoResult]);
+          ->execute([$cid, date('Y-m-d H:i:s'), 'CARGO', 'VENTA', $order_id, 'Venta pedido #'.$order_id, $montoCargo, $saldoResult]);
 
         // Seña opcional
         if ($senia > 0) {
+          $debug_step = 'insert_payments_senia';
           $stmtP = db()->prepare("INSERT INTO payments (customer_id, order_id, fecha, medio, importe, referencia, voucher_path, bank_account_id, third_party_name)
                          VALUES (?,?,?,?,?,?,?,?,?)");
           $stmtP->execute([$cid, $order_id, date('Y-m-d H:i:s'), $P['medio'], $senia, 'Seña', $P['voucher_path'], $P['bank_account_id'], $P['third_party_name'] ?: null]);
           $payment_id = db()->lastInsertId();
 
           // Generar Comprobante
+          $debug_step = 'insert_payment_receipts';
           db()->prepare("INSERT INTO payment_receipts (customer_id, order_id, payment_id, fecha, monto, concepto) VALUES (?, ?, ?, ?, ?, ?)")
             ->execute([$cid, $order_id, $payment_id, date('Y-m-d H:i:s'), $senia, "Seña Pedido #$order_id"]);
           $receipt_id = db()->lastInsertId();
           // Fin Comprobante
 
           $saldoResult = $saldoResult - $senia;
+            $debug_step = 'insert_customer_ledger_abono';
           db()->prepare("INSERT INTO customer_ledger (customer_id, fecha, tipo, origen, referencia_id, detalle, monto, saldo_resultante)
                          VALUES (?,?,?,?,?,?,?,?)")
             ->execute([$cid, date('Y-m-d H:i:s'), 'ABONO', 'PAGO', $order_id, 'Seña pedido #'.$order_id, $senia, $saldoResult]);
@@ -628,7 +802,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       } catch (Throwable $e) {
         db()->rollBack();
-        $error = 'Error al confirmar: ' . $e->getMessage();
+        $error = 'Error al confirmar [v4 ' . $debug_step . ']: ' . $e->getMessage();
       }
     }
     $step = 3;
@@ -937,7 +1111,14 @@ if ($step === 3):
   $descuento = round($total * $descuento_pct / 100, 2) + $descuento_monto;
   $neto = max(0, $total - $descuento);
   $senia = (float)($P['senia'] ?? 0); 
-  $saldo = max(0, $neto - $senia);
+  $fin_local = calcular_financiacion(
+    $neto,
+    $senia,
+    (int)($P['incluye_iva'] ?? 1),
+    (int)($P['financing_installments'] ?? 2),
+    (int)($P['financing_enabled'] ?? 0)
+  );
+  $saldo = $fin_local['enabled'] ? $fin_local['total'] : $fin_local['saldo_base'];
   $items_view = $P['items'];
 
   if ($order_id_export) {
@@ -964,6 +1145,16 @@ if ($step === 3):
       $neto = (float)$order_export['total_neto'];
       $senia = (float)$order_export['senia'];
       $saldo = (float)$order_export['saldo'];
+      $P['financing_enabled'] = (int)($order_export['financing_enabled'] ?? 0);
+      $P['financing_installments'] = (int)($order_export['financing_installments'] ?? 2);
+      $fin_local = calcular_financiacion(
+        $neto,
+        $senia,
+        (int)($order_export['incluye_iva'] ?? 1),
+        (int)($order_export['financing_installments'] ?? 2),
+        (int)($order_export['financing_enabled'] ?? 0)
+      );
+      $saldo = $fin_local['enabled'] ? (float)($order_export['financing_total'] ?? $fin_local['total']) : (float)$saldo;
 
       $stmtItems = db()->prepare("SELECT oi.cant, oi.precio_unit, oi.subtotal, p.codigo, p.nombre
                                   FROM order_items oi
@@ -992,6 +1183,7 @@ if ($step === 3):
   // Prepare display variables
   $clientName = $cli['nombre'] ?? 'Desconocido';
   $clientId   = $cli['id'] ?? null;
+  $is_post_confirm_view = ($order_id_export > 0 && empty($P['items']));
 
   ?>
   <div class="container py-4">
@@ -1043,8 +1235,13 @@ if ($step === 3):
                 <div>Subtotal: <strong><?= money($total) ?></strong></div>
                 <div>Descuento: <strong><?= money($descuento) ?></strong></div>
                 <div>Total Neto: <strong><?= money($neto) ?></strong></div>
+                <div>Total con IVA: <strong><?= money($fin_local['total_con_iva']) ?></strong></div>
                 <div>Seña: <strong><?= money($senia) ?></strong></div>
                 <div>Saldo: <strong><?= money($saldo) ?></strong></div>
+                <?php if ($fin_local['enabled']): ?>
+                  <div>Recargo financiación (3%): <strong><?= money($fin_local['recargo']) ?></strong></div>
+                  <div><?= (int)$fin_local['cuotas'] ?> cuotas de: <strong><?= money($fin_local['cuota']) ?></strong></div>
+                <?php endif; ?>
               </div>
             </div>
           </div>
@@ -1143,6 +1340,45 @@ if ($step === 3):
                   </label>
                 </div>
               </div>
+              <div class="col-12">
+                <hr class="my-1">
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" name="financing_enabled" value="1" id="financing_enabled" <?= ($P['financing_enabled'] ?? 0) ? 'checked' : '' ?> onchange="toggleFinancingFields()">
+                  <label class="form-check-label" for="financing_enabled">
+                    Financiar saldo (+3% recargo total)
+                  </label>
+                </div>
+                <div id="financingFields" style="display: <?= ($P['financing_enabled'] ?? 0) ? 'block' : 'none' ?>;">
+                  <label class="form-label">Plan de cuotas</label>
+                  <select name="financing_installments" class="form-select" id="financingInstallments">
+                    <?php for ($i = 2; $i <= 12; $i++): ?>
+                      <option value="<?= $i ?>" <?= ((int)($P['financing_installments'] ?? 2) === $i) ? 'selected' : '' ?>><?= $i ?> cuotas</option>
+                    <?php endfor; ?>
+                  </select>
+                  <small class="text-muted">
+                    Base con IVA: <?= money($fin_local['saldo_base']) ?> | Recargo 3%: <?= money($fin_local['recargo']) ?> | Total financiado: <?= money($fin_local['total']) ?>
+                  </small>
+                  <div class="table-responsive mt-2">
+                    <table class="table table-sm mb-0">
+                      <thead>
+                        <tr>
+                          <th>Plan</th>
+                          <th class="text-end">Valor cuota</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <?php for ($i = 2; $i <= 12; $i++): ?>
+                          <?php $planTmp = calcular_financiacion($neto, $senia, (int)($P['incluye_iva'] ?? 1), $i, 1); ?>
+                          <tr class="<?= ((int)($P['financing_installments'] ?? 2) === $i) ? 'table-warning' : '' ?>">
+                            <td><?= $i ?> cuotas</td>
+                            <td class="text-end"><?= money($planTmp['cuota']) ?></td>
+                          </tr>
+                        <?php endfor; ?>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
               <div class="col-12 d-flex justify-content-between">
                 <a class="btn btn-outline-secondary" href="<?= url('pedido_nuevo.php') ?>?step=2">« Volver a Ítems</a>
                 <button class="btn btn-outline-primary">Guardar cambios</button>
@@ -1154,6 +1390,13 @@ if ($step === 3):
                 const select = document.getElementById('diasEntrega');
                 const div = document.getElementById('fechaManualDiv');
                 div.style.display = select.value === 'manual' ? 'block' : 'none';
+              }
+
+              function toggleFinancingFields() {
+                const enabled = document.getElementById('financing_enabled');
+                const fields = document.getElementById('financingFields');
+                if (!enabled || !fields) return;
+                fields.style.display = enabled.checked ? 'block' : 'none';
               }
               
               function toggleTransferFields() {
@@ -1193,6 +1436,7 @@ if ($step === 3):
               document.addEventListener('DOMContentLoaded', function() {
                 toggleTransferFields();
                 toggleFechaManual();
+                toggleFinancingFields();
               });
             </script>
           </div>
@@ -1231,11 +1475,16 @@ if ($step === 3):
                   Exportar presupuesto
                 </a>
               <?php endif; ?>
-              
-              <form method="post">
-                <input type="hidden" name="action" value="confirm_order">
-                <button class="btn btn-primary w-100">Confirmar pedido</button>
-              </form>
+
+              <?php if ($is_post_confirm_view): ?>
+                <div class="alert alert-success mb-2">Este pedido ya fue confirmado.</div>
+                <a class="btn btn-primary w-100" href="<?= url('pedidos.php') ?>">Ir a Pedidos</a>
+              <?php else: ?>
+                <form method="post">
+                  <input type="hidden" name="action" value="confirm_order">
+                  <button class="btn btn-primary w-100">Confirmar pedido</button>
+                </form>
+              <?php endif; ?>
             <?php endif; ?>
           </div>
         </div>

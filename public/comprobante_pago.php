@@ -18,6 +18,17 @@ if (!$rec) {
     die("Comprobante no encontrado.");
 }
 
+$maquinas_pedido = [];
+if (!empty($rec['order_id'])) {
+    $stmtMaquinas = db()->prepare("SELECT p.codigo, p.nombre, oi.cant
+                                   FROM order_items oi
+                                   JOIN products p ON p.id = oi.product_id
+                                   WHERE oi.order_id = ? AND p.tipo = 'PT'
+                                   ORDER BY p.nombre");
+    $stmtMaquinas->execute([(int)$rec['order_id']]);
+    $maquinas_pedido = $stmtMaquinas->fetchAll(PDO::FETCH_ASSOC);
+}
+
 // Calcular Saldo Actual del Cliente
 $stmtSaldo = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
                             FROM customer_ledger WHERE customer_id=?");
@@ -97,6 +108,21 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
                 <td>
                     <?php if ($rec['order_id']): ?>
                         Pedido #<?= (int)$rec['order_id'] ?>
+                    <?php else: ?>
+                        -
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <tr>
+                <th>Maquinas del Pedido</th>
+                <td>
+                    <?php if ($rec['order_id'] && $maquinas_pedido): ?>
+                        <ul style="margin: 0; padding-left: 18px;">
+                            <?php foreach ($maquinas_pedido as $m): ?>
+                                <?php $cantTxt = rtrim(rtrim(number_format((float)$m['cant'], 2, ',', ''), '0'), ','); ?>
+                                <li><?= e($m['nombre']) ?> (x<?= e($cantTxt) ?>)</li>
+                            <?php endforeach; ?>
+                        </ul>
                     <?php else: ?>
                         -
                     <?php endif; ?>
