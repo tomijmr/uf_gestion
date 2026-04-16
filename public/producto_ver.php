@@ -485,21 +485,25 @@ include __DIR__ . '/../views/partials/navbar.php';
                 <th>Código</th>
                 <th>Nombre</th>
                 <th>Unidad</th>
-                <th class="text-end" style="width:180px;">$ Costo Est.</th> <th class="text-end" style="width:220px;">Cant. por unidad</th>
+                <th class="text-end" style="width:180px;">$ Costo Est.</th>
+                <th class="text-end" style="width:220px;">Cant. por unidad</th>
+                <th class="text-end" style="width:180px;">Subtotal</th>
                 <th class="text-end" style="width:140px;">Acciones</th>
               </tr>
             </thead>
             <tbody>
               <?php if (!$bom): ?>
-                <tr><td colspan="6" class="text-center text-muted py-4">Sin componentes aún. Agregá el primero.</td></tr>
-              <?php else: foreach ($bom as $b): $cid = (int)$b['component_id']; ?>
+                <tr><td colspan="7" class="text-center text-muted py-4">Sin componentes aún. Agregá el primero.</td></tr>
+              <?php else: foreach ($bom as $b): $cid = (int)$b['component_id']; $subtotal = (float)$b['costo_std'] * (float)$b['cant_por_unidad']; ?>
                 <tr>
                   <td><?= e($b['codigo']) ?></td>
                   <td><?= e($b['nombre']) ?></td>
                   <td><?= e($b['unidad']) ?></td>
-                  <td class="text-end"><?= money($b['costo_std']) ?></td> <td class="text-end">
-                    <input class="form-control form-control-sm text-end" type="number" step="0.0001" min="0.0001" name="cant[<?= $cid ?>]" value="<?= (float)$b['cant_por_unidad'] ?>">
+                  <td class="text-end"><?= money($b['costo_std']) ?></td>
+                  <td class="text-end">
+                    <input class="form-control form-control-sm text-end js-bom-cant" data-cost="<?= (float)$b['costo_std'] ?>" type="number" step="0.0001" min="0.0001" name="cant[<?= $cid ?>]" value="<?= (float)$b['cant_por_unidad'] ?>">
                   </td>
+                  <td class="text-end js-bom-subtotal"><?= money($subtotal) ?></td>
                   <td class="text-end">
                     <button type="submit"
                             name="bom_remove_id"
@@ -520,6 +524,31 @@ include __DIR__ . '/../views/partials/navbar.php';
         </div>
         <?php endif; ?>
       </form>
+
+      <script>
+        // Recalcular subtotal por fila al editar la cantidad sin esperar guardar.
+        document.querySelectorAll('.js-bom-cant').forEach((input) => {
+          const recalcSubtotal = () => {
+            const row = input.closest('tr');
+            const subtotalCell = row ? row.querySelector('.js-bom-subtotal') : null;
+            if (!subtotalCell) return;
+
+            const cost = parseFloat(input.dataset.cost || '0');
+            const qty = parseFloat(input.value || '0');
+            const subtotal = Math.max(0, cost * qty);
+
+            subtotalCell.textContent = new Intl.NumberFormat('es-AR', {
+              style: 'currency',
+              currency: 'ARS',
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            }).format(subtotal);
+          };
+
+          input.addEventListener('input', recalcSubtotal);
+          input.addEventListener('change', recalcSubtotal);
+        });
+      </script>
 
       <p class="small text-muted mt-3">
         Al <strong>Iniciar</strong> una OP se consume MP según esta BOM; al <strong>Finalizar</strong> se ingresa PT. El precio del PT se recalcula siempre con <em>costo BOM + margen</em>.
