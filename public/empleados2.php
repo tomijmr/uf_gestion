@@ -45,6 +45,16 @@ $hasHorarioEntrada = isset($attendanceCols['horario_entrada']);
 $hasHoraEntrada = isset($attendanceCols['hora_entrada']);
 $hasHoraSalida = isset($attendanceCols['hora_salida']);
 
+$hoursExprSql = (($hasIngresoManana || $hasIngresoTarde)
+    ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
+    : (($hasHoraEntrada && $hasHoraSalida)
+      ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
+      : ($hasHorasTrabajadas
+        ? 'COALESCE(horas_trabajadas,0)'
+        : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)')));
+
+$extraExprSql = $hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -127,6 +137,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               $insertVals[] = $horaSalida;
             }
 
+            // Normaliza 1 registro por empleado/fecha para evitar acumulaciones por turnos anteriores.
+            db()->prepare("DELETE FROM employee_attendance WHERE employee_id=? AND fecha=?")
+              ->execute([$employee_id, $fecha]);
+
             $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
             $updates = [];
             foreach ($insertCols as $col) {
@@ -173,8 +187,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Ya existe una liquidacion para este empleado en esa semana.');
             }
 
-            $stmtH = db()->prepare("SELECT COALESCE(SUM(horas_trabajadas),0) FROM employee_attendance
-                                    WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+            $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExprSql),0)
+                                    FROM employee_attendance a
+                                    INNER JOIN (
+                                      SELECT MAX(id) AS id
+                                      FROM employee_attendance
+                                      WHERE employee_id=? AND fecha BETWEEN ? AND ?
+                                      GROUP BY fecha
+                                    ) latest ON latest.id = a.id");
             $stmtH->execute([$employee_id, $week_start, $week_end]);
             $hours = (float)$stmtH->fetchColumn();
             if ($hours <= 0) throw new Exception('No hay horas registradas en la semana.');
@@ -247,19 +267,21 @@ $weeklySummary = [];
 foreach ($employees as $e) {
     $eid = (int)$e['id'];
 
+  $latestByDaySql = "FROM employee_attendance a
+              INNER JOIN (
+                SELECT MAX(id) AS id
+                FROM employee_attendance
+                WHERE employee_id=? AND fecha BETWEEN ? AND ?
+                GROUP BY fecha
+              ) latest ON latest.id = a.id";
+
   $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
   $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
-  $selHorasExtras = $hasHorasExtras ? 'horas_extras' : '0 AS horas_extras';
-  $selHorasTrabajadas = (($hasIngresoManana || $hasIngresoTarde)
-      ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
-      : (($hasHoraEntrada && $hasHoraSalida)
-        ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ") AS horas_trabajadas"
-        : ($hasHorasTrabajadas
-          ? 'COALESCE(horas_trabajadas,0) AS horas_trabajadas'
-          : '(CASE WHEN presente=1 THEN 8 ELSE 0 END) AS horas_trabajadas')));
+  $selHorasExtras = $hasHorasExtras ? 'COALESCE(horas_extras,0) AS horas_extras' : '0 AS horas_extras';
+  $selHorasTrabajadas = $hoursExprSql . ' AS horas_trabajadas';
 
   $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasExtras, $selHorasTrabajadas, notas
-              FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+              $latestByDaySql");
     $stmtA->execute([$eid, $week_start, $week_end]);
     $rowsA = $stmtA->fetchAll();
 
@@ -268,22 +290,13 @@ foreach ($employees as $e) {
         $attendanceMap[$eid][$ra['fecha']] = $ra;
     }
 
-    $hoursExpr = (($hasIngresoManana || $hasIngresoTarde)
-        ? "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
-        : (($hasHoraEntrada && $hasHoraSalida)
-          ? "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")"
-          : ($hasHorasTrabajadas
-            ? 'COALESCE(horas_trabajadas,0)'
-            : '(CASE WHEN presente=1 THEN 8 ELSE 0 END)')));
-
-    $extraExpr = $hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0';
-    $stmtExtra = db()->prepare("SELECT COALESCE(SUM($extraExpr),0) FROM employee_attendance
-                  WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+    $stmtExtra = db()->prepare("SELECT COALESCE(SUM($extraExprSql),0)
+                  $latestByDaySql");
     $stmtExtra->execute([$eid, $week_start, $week_end]);
     $extras = (float)$stmtExtra->fetchColumn();
 
-    $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExpr),0) FROM employee_attendance
-                WHERE employee_id=? AND fecha BETWEEN ? AND ?");
+    $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExprSql),0)
+                $latestByDaySql");
     $stmtH->execute([$eid, $week_start, $week_end]);
     $hours = (float)$stmtH->fetchColumn();
 
