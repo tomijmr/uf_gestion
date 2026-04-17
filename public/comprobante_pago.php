@@ -204,12 +204,6 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
                     <?php endif; ?>
                 </td>
             </tr>
-            <?php if(!empty($rec['notes'])): ?>
-            <tr>
-                <th>Notas / Observaciones</th>
-                <td><?= nl2br(e($rec['notes'])) ?></td>
-            </tr>
-            <?php endif; ?>
         </table>
 
         <!-- Total -->
