@@ -4,12 +4,23 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+db()->exec("CREATE TABLE IF NOT EXISTS payment_receipt_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    receipt_id INT NOT NULL,
+    payment_id INT NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_receipt_payment (receipt_id, payment_id),
+    KEY idx_payment_id (payment_id),
+    CONSTRAINT fk_pri_receipt FOREIGN KEY (receipt_id) REFERENCES payment_receipts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_pri_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 $id = (int)($_GET['id'] ?? 0);
 
-$stmt = db()->prepare("SELECT r.*, c.nombre, c.cuit_dni, c.telefono, c.direccion, p.medio, p.referencia AS ref_pago
+$stmt = db()->prepare("SELECT r.*, c.nombre, c.cuit_dni, c.telefono, c.direccion
                        FROM payment_receipts r
                        JOIN customers c ON c.id = r.customer_id
-                       JOIN payments p ON p.id = r.payment_id
                        WHERE r.id = ?");
 $stmt->execute([$id]);
 $rec = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -27,6 +38,36 @@ if (!empty($rec['order_id'])) {
                                    ORDER BY p.nombre");
     $stmtMaquinas->execute([(int)$rec['order_id']]);
     $maquinas_pedido = $stmtMaquinas->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$stmtItems = db()->prepare("SELECT p.id, p.order_id, p.fecha, p.medio, p.importe, p.referencia, p.third_party_name, ba.nombre AS bank_name
+                           FROM payment_receipt_items pri
+                           JOIN payments p ON p.id = pri.payment_id
+                           LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                           WHERE pri.receipt_id = ?
+                           ORDER BY p.fecha ASC, p.id ASC");
+$stmtItems->execute([$id]);
+$payment_items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+
+if (!$payment_items && !empty($rec['payment_id'])) {
+    $stmtFallback = db()->prepare("SELECT p.id, p.order_id, p.fecha, p.medio, p.importe, p.referencia, p.third_party_name, ba.nombre AS bank_name
+                                  FROM payments p
+                                  LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                                  WHERE p.id = ?");
+    $stmtFallback->execute([(int)$rec['payment_id']]);
+    $single = $stmtFallback->fetch(PDO::FETCH_ASSOC);
+    if ($single) {
+        $payment_items = [$single];
+    }
+}
+
+$pedidos_ref = [];
+$total_detalle = 0.0;
+foreach ($payment_items as $it) {
+    $total_detalle += (float)($it['importe'] ?? 0);
+    if (!empty($it['order_id'])) {
+        $pedidos_ref[(int)$it['order_id']] = true;
+    }
 }
 
 // Calcular Saldo Actual del Cliente
@@ -106,8 +147,12 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
             <tr>
                 <th>Referencia / Pedido</th>
                 <td>
-                    <?php if ($rec['order_id']): ?>
+                    <?php if (!empty($rec['order_id'])): ?>
                         Pedido #<?= (int)$rec['order_id'] ?>
+                    <?php elseif (count($pedidos_ref) === 1): ?>
+                        Pedido #<?= (int)array_key_first($pedidos_ref) ?>
+                    <?php elseif (count($pedidos_ref) > 1): ?>
+                        Varios pedidos: <?= e(implode(', ', array_map(static fn($n) => '#' . (int)$n, array_keys($pedidos_ref)))) ?>
                     <?php else: ?>
                         -
                     <?php endif; ?>
@@ -129,8 +174,35 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
                 </td>
             </tr>
             <tr>
-                <th>Medio de Pago</th>
-                <td><?= e($rec['medio']) ?> (<?= e($rec['ref_pago']) ?>)</td>
+                <th>Detalle de pagos</th>
+                <td>
+                    <?php if (!$payment_items): ?>
+                        -
+                    <?php else: ?>
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead>
+                                <tr>
+                                    <th style="border-bottom:1px solid #ddd; text-align:left; padding:4px;">Pago</th>
+                                    <th style="border-bottom:1px solid #ddd; text-align:left; padding:4px;">Fecha</th>
+                                    <th style="border-bottom:1px solid #ddd; text-align:left; padding:4px;">Medio</th>
+                                    <th style="border-bottom:1px solid #ddd; text-align:left; padding:4px;">Referencia</th>
+                                    <th style="border-bottom:1px solid #ddd; text-align:right; padding:4px;">Importe</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($payment_items as $it): ?>
+                                    <tr>
+                                        <td style="padding:4px;">#<?= (int)$it['id'] ?></td>
+                                        <td style="padding:4px;"><?= e(date('d/m/Y H:i', strtotime((string)$it['fecha']))) ?></td>
+                                        <td style="padding:4px;"><?= e($it['medio']) ?><?= !empty($it['bank_name']) ? ' (' . e($it['bank_name']) . ')' : '' ?></td>
+                                        <td style="padding:4px;"><?= e($it['referencia'] ?: '-') ?><?= !empty($it['third_party_name']) ? ' | Tercero: ' . e($it['third_party_name']) : '' ?></td>
+                                        <td style="padding:4px; text-align:right;"><?= money((float)$it['importe']) ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endif; ?>
+                </td>
             </tr>
             <?php if(!empty($rec['notes'])): ?>
             <tr>
@@ -142,7 +214,7 @@ $fecha = date('d/m/Y H:i', strtotime($rec['fecha']));
 
         <!-- Total -->
         <div class="total-box">
-            Monto Total: <?= money($rec['monto']) ?>
+            Monto Total: <?= money($total_detalle > 0 ? $total_detalle : (float)$rec['monto']) ?>
         </div>
 
         <?php if ($saldo_actual > 0): ?>

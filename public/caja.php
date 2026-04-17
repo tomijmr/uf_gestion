@@ -4,6 +4,19 @@ require_login();
 require_once __DIR__ . '/../app/db.php';
 require_once __DIR__ . '/../app/helpers.php';
 
+// Tabla puente para permitir un comprobante con multiples pagos.
+db()->exec("CREATE TABLE IF NOT EXISTS payment_receipt_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  receipt_id INT NOT NULL,
+  payment_id INT NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_receipt_payment (receipt_id, payment_id),
+  KEY idx_payment_id (payment_id),
+  CONSTRAINT fk_pri_receipt FOREIGN KEY (receipt_id) REFERENCES payment_receipts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pri_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
@@ -32,7 +45,11 @@ if (($is_print || $is_export) && ($_GET['tab'] ?? '') === 'cc') {
 
     // Movimientos (mism query que vista, pero quizás sin limit o limit más grande)
     $sqlCC = "SELECT cl.id, cl.fecha, cl.tipo, cl.origen, cl.referencia_id, cl.detalle, cl.monto, cl.saldo_resultante,
-                     p.medio, p.bank_account_id, p.third_party_name, p.referencia, ba.nombre AS bank_name
+             p.medio, p.bank_account_id, p.third_party_name, p.referencia, ba.nombre AS bank_name,
+             (SELECT MAX(rr.id)
+              FROM payment_receipts rr
+              LEFT JOIN payment_receipt_items rri ON rri.receipt_id = rr.id
+               WHERE rr.payment_id = p.id OR rri.payment_id = p.id) AS receipt_id
               FROM customer_ledger cl
               LEFT JOIN payments p ON p.id = cl.referencia_id AND cl.origen = 'PAGO'
               LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
@@ -532,6 +549,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       db()->prepare("INSERT INTO payment_receipts (customer_id, order_id, payment_id, fecha, monto, concepto, notes, created_at)
                      VALUES (?, ?, ?, NOW(), ?, ?, ?, NOW())")
         ->execute([$customer_id, $order_id ?: null, $payment_id, $importe, 'Pago en Caja', 'Referencia: '.$referencia]);
+      $receipt_id = (int)db()->lastInsertId();
+      db()->prepare("INSERT INTO payment_receipt_items (receipt_id, payment_id, amount, created_at)
+                     VALUES (?, ?, ?, NOW())")->execute([$receipt_id, $payment_id, $importe]);
 
       // Ledger ABONO
       $ss = db()->prepare("SELECT COALESCE(SUM(CASE WHEN tipo='CARGO' THEN monto ELSE -monto END),0) AS saldo
@@ -553,12 +573,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       db()->commit();
+
+      if (isset($_POST['imprimir_comprobante']) && (string)$_POST['imprimir_comprobante'] === '1') {
+        header('Location: ' . url('comprobante_pago.php?id=' . $receipt_id));
+        exit;
+      }
+
       $flash_ok = "Pago registrado correctamente.";
       $tab = 'cobrar';
     } catch (Throwable $e) {
       db()->rollBack();
       $flash_err = 'No se pudo registrar el pago: ' . $e->getMessage();
       $tab = 'cobrar';
+    }
+  }
+
+  // --- COMPROBANTE MULTIPAGO (desde Cuenta Corriente) ---
+  if ($action === 'generar_comprobante_multipago') {
+    $customer_id = (int)($_POST['customer_id'] ?? 0);
+    $payment_ids_raw = $_POST['payment_ids'] ?? [];
+
+    try {
+      if ($customer_id <= 0) throw new Exception('Debe seleccionar un cliente.');
+      if (!is_array($payment_ids_raw) || count($payment_ids_raw) === 0) {
+        throw new Exception('Debe seleccionar al menos un pago para generar el comprobante.');
+      }
+
+      $payment_ids = array_values(array_unique(array_filter(array_map('intval', $payment_ids_raw), static function ($v) {
+        return $v > 0;
+      })));
+      if (count($payment_ids) === 0) {
+        throw new Exception('No se recibieron pagos validos.');
+      }
+
+      db()->beginTransaction();
+
+      $ph = implode(',', array_fill(0, count($payment_ids), '?'));
+      $sqlSel = "SELECT p.id, p.order_id, p.fecha, p.medio, p.importe, p.referencia, p.third_party_name, ba.nombre AS bank_name
+                 FROM payments p
+                 LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
+                 WHERE p.customer_id = ? AND p.id IN ($ph)
+                 ORDER BY p.fecha ASC, p.id ASC
+                 FOR UPDATE";
+      $paramsSel = array_merge([$customer_id], $payment_ids);
+      $stSel = db()->prepare($sqlSel);
+      $stSel->execute($paramsSel);
+      $selected_payments = $stSel->fetchAll();
+
+      if (count($selected_payments) !== count($payment_ids)) {
+        throw new Exception('Uno o mas pagos no existen o no pertenecen al cliente seleccionado.');
+      }
+
+      $total = 0.0;
+      $order_ids = [];
+      $detalle_lines = [];
+      foreach ($selected_payments as $p) {
+        $total += (float)$p['importe'];
+        if (!empty($p['order_id'])) $order_ids[(int)$p['order_id']] = true;
+        $detalle_lines[] = sprintf(
+          '- Pago #%d | %s | %s%s | %s',
+          (int)$p['id'],
+          date('d/m/Y H:i', strtotime((string)$p['fecha'])),
+          (string)$p['medio'],
+          !empty($p['bank_name']) ? ' (' . (string)$p['bank_name'] . ')' : '',
+          money((float)$p['importe'])
+        ) . (!empty($p['referencia']) ? (' | Ref: ' . (string)$p['referencia']) : '')
+          . (!empty($p['third_party_name']) ? (' | Tercero: ' . (string)$p['third_party_name']) : '');
+      }
+
+      $order_id_receipt = count($order_ids) === 1 ? (int)array_key_first($order_ids) : null;
+      $first_payment_id = (int)$selected_payments[0]['id'];
+      $notes = "Comprobante consolidado de pagos:\n" . implode("\n", $detalle_lines);
+
+      db()->prepare("INSERT INTO payment_receipts (customer_id, order_id, payment_id, fecha, monto, concepto, notes, created_at)
+                     VALUES (?, ?, ?, NOW(), ?, ?, ?, NOW())")
+        ->execute([$customer_id, $order_id_receipt, $first_payment_id, $total, 'Pago en Caja (Consolidado)', $notes]);
+      $receipt_id = (int)db()->lastInsertId();
+
+      $insItem = db()->prepare("INSERT INTO payment_receipt_items (receipt_id, payment_id, amount, created_at)
+                                VALUES (?, ?, ?, NOW())");
+      foreach ($selected_payments as $p) {
+        $insItem->execute([$receipt_id, (int)$p['id'], (float)$p['importe']]);
+      }
+
+      db()->commit();
+
+      if (isset($_POST['imprimir_comprobante']) && (string)$_POST['imprimir_comprobante'] === '1') {
+        header('Location: ' . url('comprobante_pago.php?id=' . $receipt_id));
+        exit;
+      }
+
+      $flash_ok = "Comprobante consolidado generado correctamente (N° " . str_pad((string)$receipt_id, 6, '0', STR_PAD_LEFT) . ").";
+      $tab = 'cc';
+      $cc_customer = $customer_id;
+    } catch (Throwable $e) {
+      if (db()->inTransaction()) db()->rollBack();
+      $flash_err = 'No se pudo generar el comprobante consolidado: ' . $e->getMessage();
+      $tab = 'cc';
+      $cc_customer = $customer_id;
     }
   }
 
@@ -640,11 +752,14 @@ $wherePaySql = $wherePay ? ('WHERE ' . implode(' AND ', $wherePay)) : '';
 
 $sqlPays = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, p.bank_account_id, 
                    p.third_party_name, p.voucher_path, c.nombre AS cliente, p.order_id, 
-                   ba.nombre AS bank_name, pr.id AS receipt_id
+             ba.nombre AS bank_name,
+             (SELECT MAX(rr.id)
+               FROM payment_receipts rr
+               LEFT JOIN payment_receipt_items rri ON rri.receipt_id = rr.id
+              WHERE rr.payment_id = p.id OR rri.payment_id = p.id) AS receipt_id
             FROM payments p
             JOIN customers c ON c.id=p.customer_id
             LEFT JOIN bank_accounts ba ON ba.id=p.bank_account_id
-            LEFT JOIN payment_receipts pr ON pr.payment_id = p.id
             $wherePaySql
             ORDER BY p.fecha $orden_fecha, p.id $orden_fecha
             LIMIT 200";
@@ -716,7 +831,11 @@ $cc_rows = [];
 $cc_saldo = null;
 if ($cc_customer > 0) {
   $stCc = db()->prepare("SELECT cl.id, cl.fecha, cl.tipo, cl.origen, cl.referencia_id, cl.detalle, cl.monto, cl.saldo_resultante,
-                                p.medio, p.bank_account_id, p.third_party_name, p.voucher_path, p.referencia, ba.nombre AS bank_name
+                                p.medio, p.bank_account_id, p.third_party_name, p.voucher_path, p.referencia, ba.nombre AS bank_name,
+                                (SELECT MAX(rr.id)
+                                   FROM payment_receipts rr
+                                   LEFT JOIN payment_receipt_items rri ON rri.receipt_id = rr.id
+                                  WHERE rr.payment_id = p.id OR rri.payment_id = p.id) AS receipt_id
                          FROM customer_ledger cl
                          LEFT JOIN payments p ON p.id = cl.referencia_id AND cl.origen = 'PAGO'
                          LEFT JOIN bank_accounts ba ON ba.id = p.bank_account_id
@@ -786,10 +905,13 @@ $rep_total_gastos = 0;
 if ($tab === 'reportes') {
   // INGRESOS
   if ($rep_tipo === 'AMBOS' || $rep_tipo === 'INGRESOS') {
-    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.voucher_path, pr.id AS receipt_id
+    $sqlRI = "SELECT p.id, p.fecha, p.medio, p.importe, p.referencia, c.nombre AS cliente, p.voucher_path,
+             (SELECT MAX(rr.id)
+              FROM payment_receipts rr
+              LEFT JOIN payment_receipt_items rri ON rri.receipt_id = rr.id
+               WHERE rr.payment_id = p.id OR rri.payment_id = p.id) AS receipt_id
               FROM payments p
               JOIN customers c ON c.id=p.customer_id
-              LEFT JOIN payment_receipts pr ON pr.payment_id = p.id
               WHERE DATE(p.fecha) BETWEEN ? AND ?
               ORDER BY p.fecha DESC";
     $stmtRI = db()->prepare($sqlRI);
@@ -1039,7 +1161,10 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
         </div>
 
         <div class="col-12 d-grid">
-          <button class="btn btn-primary" type="submit">Registrar pago</button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary flex-fill" type="submit">Registrar pago</button>
+            <button class="btn btn-outline-primary flex-fill" type="submit" name="imprimir_comprobante" value="1">Registrar e imprimir comprobante</button>
+          </div>
         </div>
       </form>
 
@@ -1493,10 +1618,15 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
           <div class="fs-5"><?= money($cc_saldo) ?></div>
         </div>
 
+        <form method="post" action="<?= url('caja.php') ?>?tab=cc&cc_customer=<?= (int)$cc_customer ?>">
+          <input type="hidden" name="action" value="generar_comprobante_multipago">
+          <input type="hidden" name="customer_id" value="<?= (int)$cc_customer ?>">
+
         <div class="table-responsive">
           <table class="table table-sm align-middle">
             <thead class="table-light">
             <tr>
+              <th style="width:40px;"><input type="checkbox" id="ccSelectAll"></th>
               <th style="width:70px;">#</th>
               <th>Fecha</th>
               <th>Tipo</th>
@@ -1508,13 +1638,21 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
               <th>Tercero</th>
               <th>Comprobante</th>
               <th>Referencia</th>
+              <th>Recibo</th>
             </tr>
             </thead>
             <tbody>
             <?php if (!$cc_rows): ?>
-              <tr><td colspan="11" class="text-center text-muted py-4">No hay movimientos.</td></tr>
+              <tr><td colspan="13" class="text-center text-muted py-4">No hay movimientos.</td></tr>
             <?php else: foreach ($cc_rows as $m): ?>
               <tr>
+                <td>
+                  <?php if (($m['origen'] ?? '') === 'PAGO' && !empty($m['referencia_id'])): ?>
+                    <input type="checkbox" class="ccPaymentCheckbox" name="payment_ids[]" value="<?= (int)$m['referencia_id'] ?>">
+                  <?php else: ?>
+                    -
+                  <?php endif; ?>
+                </td>
                 <td><?= (int)$m['id'] ?></td>
                 <td><?= e($m['fecha']) ?></td>
                 <td><?= e($m['tipo']) ?></td>
@@ -1532,11 +1670,35 @@ function paneActive($t, $tab) { return $t===$tab ? 'show active' : ''; }
                   <?php endif; ?>
                 </td>
                 <td><?= e($m['referencia'] ?? $m['detalle']) ?></td>
+                <td>
+                  <?php if (!empty($m['receipt_id'])): ?>
+                    <a href="<?= url('comprobante_pago.php?id=' . (int)$m['receipt_id']) ?>" target="_blank" class="btn btn-sm btn-outline-primary">Ver</a>
+                  <?php else: ?>
+                    -
+                  <?php endif; ?>
+                </td>
               </tr>
             <?php endforeach; endif; ?>
             </tbody>
           </table>
         </div>
+        <div class="d-flex justify-content-end gap-2 mt-2">
+          <button type="submit" class="btn btn-primary">Generar comprobante con pagos seleccionados</button>
+          <button type="submit" class="btn btn-outline-primary" name="imprimir_comprobante" value="1">Generar e imprimir</button>
+        </div>
+        </form>
+
+        <script>
+          (function () {
+            const selectAll = document.getElementById('ccSelectAll');
+            if (!selectAll) return;
+            selectAll.addEventListener('change', function () {
+              document.querySelectorAll('.ccPaymentCheckbox').forEach(function (cb) {
+                cb.checked = !!selectAll.checked;
+              });
+            });
+          })();
+        </script>
       <?php else: ?>
         <div class="alert alert-info">Elegí un cliente para ver su cuenta corriente.</div>
       <?php endif; ?>
