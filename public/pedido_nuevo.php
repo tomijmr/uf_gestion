@@ -280,6 +280,8 @@ if (!isset($_SESSION['pedido'])) {
     'machine_id' => 0,
     'items' => [], // ['product_id','codigo','nombre','precio','cant','subtotal']
     'senia' => 0.0,
+    'senia_mode' => 'MANUAL',
+    'senia_manual' => 0.0,
     'medio' => 'EFECTIVO',
     'observaciones' => '',
     'transporte_bonificado' => 0,
@@ -316,6 +318,14 @@ $P =& $_SESSION['pedido'];
 
 function pedido_total_bruto(array $items): float {
   $t = 0.0; foreach ($items as $it) $t += (float)$it['subtotal']; return $t;
+}
+
+function pedido_total_neto(array $pedido): float {
+  $total = pedido_total_bruto($pedido['items'] ?? []);
+  $descuentoPct = (float)($pedido['descuento_pct'] ?? 0);
+  $descuentoMonto = (float)($pedido['descuento_monto'] ?? 0);
+  $descuento = round($total * $descuentoPct / 100, 2) + $descuentoMonto;
+  return max(0, round($total - $descuento, 2));
 }
 
 function pedido_resolver_machine_id(array $pedido): int {
@@ -612,7 +622,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   // Guardar pago/observaciones
   if (($_POST['action'] ?? '') === 'set_payment') {
-    $P['senia'] = max(0, (float)($_POST['senia'] ?? 0));
+    $seniaMode = strtoupper(trim((string)($_POST['senia_mode'] ?? 'MANUAL')));
+    if (!in_array($seniaMode, ['PCT30', 'PCT50', 'MANUAL'], true)) {
+      $seniaMode = 'MANUAL';
+    }
+    $netoActual = pedido_total_neto($P);
+    $seniaManual = max(0, (float)($_POST['senia_manual'] ?? 0));
+
+    $P['senia_mode'] = $seniaMode;
+    $P['senia_manual'] = $seniaManual;
+
+    if ($seniaMode === 'PCT30') {
+      $P['senia'] = round($netoActual * 0.30, 2);
+    } elseif ($seniaMode === 'PCT50') {
+      $P['senia'] = round($netoActual * 0.50, 2);
+    } else {
+      $P['senia'] = $seniaManual;
+    }
+
     $P['medio'] = $_POST['medio'] ?? 'EFECTIVO';
     $P['observaciones'] = trim($_POST['observaciones'] ?? '');
     $P['transporte_bonificado'] = (int)($_POST['transporte_bonificado'] ?? 0);
@@ -1110,7 +1137,24 @@ if ($step === 3):
   $descuento_monto = isset($P['descuento_monto']) ? (float)$P['descuento_monto'] : 0;
   $descuento = round($total * $descuento_pct / 100, 2) + $descuento_monto;
   $neto = max(0, $total - $descuento);
-  $senia = (float)($P['senia'] ?? 0); 
+  $senia_mode = strtoupper(trim((string)($P['senia_mode'] ?? 'MANUAL')));
+  if (!in_array($senia_mode, ['PCT30', 'PCT50', 'MANUAL'], true)) {
+    $senia_mode = 'MANUAL';
+  }
+  $senia_manual = max(0, (float)($P['senia_manual'] ?? ($P['senia'] ?? 0)));
+
+  if ($senia_mode === 'PCT30') {
+    $senia = round($neto * 0.30, 2);
+    $P['senia'] = $senia;
+  } elseif ($senia_mode === 'PCT50') {
+    $senia = round($neto * 0.50, 2);
+    $P['senia'] = $senia;
+  } else {
+    $senia = max(0, (float)($P['senia'] ?? $senia_manual));
+    $P['senia'] = $senia;
+    $P['senia_manual'] = $senia;
+  }
+
   $fin_local = calcular_financiacion(
     $neto,
     $senia,
@@ -1254,9 +1298,18 @@ if ($step === 3):
             <h6 class="mb-3">Pago (opcional)</h6>
             <form method="post" class="row g-2" enctype="multipart/form-data">
               <input type="hidden" name="action" value="set_payment">
+              <div class="col-12">
+                <label class="form-label">Tipo de seña</label>
+                <select class="form-select" name="senia_mode" id="seniaMode" onchange="updateSeniaField()">
+                  <option value="PCT30" <?= $senia_mode==='PCT30'?'selected':'' ?>>Seña 30%</option>
+                  <option value="PCT50" <?= $senia_mode==='PCT50'?'selected':'' ?>>Seña 50%</option>
+                  <option value="MANUAL" <?= $senia_mode==='MANUAL'?'selected':'' ?>>Seña manual</option>
+                </select>
+                <small class="text-muted">30% y 50% se calculan sobre el total neto del pedido/presupuesto.</small>
+              </div>
               <div class="col-6">
-                <label class="form-label">Seña</label>
-                <input class="form-control" type="number" step="0.01" name="senia" value="<?= (float)$P['senia'] ?>">
+                <label class="form-label">Monto de seña</label>
+                <input class="form-control" type="number" step="0.01" min="0" name="senia_manual" id="seniaManual" value="<?= e(number_format((float)$senia_manual, 2, '.', '')) ?>">
               </div>
               <div class="col-6">
                 <label class="form-label">Medio</label>
@@ -1415,6 +1468,25 @@ if ($step === 3):
                   thirdPartyDiv.style.display = 'none';
                 }
               }
+
+              function updateSeniaField() {
+                const modeEl = document.getElementById('seniaMode');
+                const seniaInput = document.getElementById('seniaManual');
+                if (!modeEl || !seniaInput) return;
+
+                const totalNeto = <?= json_encode((float)$neto) ?>;
+                const mode = modeEl.value;
+
+                if (mode === 'PCT30') {
+                  seniaInput.value = (totalNeto * 0.30).toFixed(2);
+                  seniaInput.readOnly = true;
+                } else if (mode === 'PCT50') {
+                  seniaInput.value = (totalNeto * 0.50).toFixed(2);
+                  seniaInput.readOnly = true;
+                } else {
+                  seniaInput.readOnly = false;
+                }
+              }
               
               function toggleThirdPartyField() {
                 const bankAccountSelect = document.getElementById('bankAccountSelect');
@@ -1434,6 +1506,7 @@ if ($step === 3):
               
               // Inicializar al cargar la página
               document.addEventListener('DOMContentLoaded', function() {
+                updateSeniaField();
                 toggleTransferFields();
                 toggleFechaManual();
                 toggleFinancingFields();

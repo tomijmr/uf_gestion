@@ -73,6 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     db()->beginTransaction();
 
     $incluye_iva = isset($_POST['incluye_iva']) ? 1 : 0;
+    $iva_rate_raw = str_replace(',', '.', trim((string)($_POST['iva_rate'] ?? '21')));
+    $iva_rate = (float)$iva_rate_raw;
+    if (!in_array($iva_rate, [21.0, 10.5], true)) {
+      $iva_rate = 21.0;
+    }
     // Obtener datos del proveedor
     $proveedor = proveedor_get($proveedor_id);
     if (!$proveedor) throw new Exception('Proveedor no encontrado.');
@@ -161,9 +166,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $insItem->execute([$purchase_id, $product_id, $codigo, $nombre, $unidad?:'UN', $cant, $costoU, $item_subtotal, $notaI]);
     }
 
-    // Calcular IVA si corresponde
+    // Calcular IVA segun tasa seleccionada (21% o 10,5%)
     if ($incluye_iva) {
-      $iva = round($subtotal * 0.21, 2);
+      $iva = round($subtotal * ($iva_rate / 100), 2);
     }
     $total = $subtotal + $iva;
 
@@ -171,7 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     db()->prepare("UPDATE purchases SET total=? WHERE id=?")->execute([$total, $purchase_id]);
 
     db()->commit();
-    header('Location: ' . url('compras.php?ok=' . urlencode('Compra registrada. Subtotal: $' . number_format($subtotal,2,',','.') . ' IVA: $' . number_format($iva,2,',','.') . ' Total: $' . number_format($total,2,',','.'))));
+    $iva_label = $incluye_iva ? (' IVA (' . str_replace('.', ',', rtrim(rtrim((string)$iva_rate, '0'), '.')) . '%): $' . number_format($iva,2,',','.')) : ' IVA: $0,00';
+    header('Location: ' . url('compras.php?ok=' . urlencode('Compra registrada. Subtotal: $' . number_format($subtotal,2,',','.') . $iva_label . ' Total: $' . number_format($total,2,',','.'))));
     exit;
 
   } catch (Throwable $e) {
@@ -231,14 +237,21 @@ include __DIR__ . '/../views/partials/navbar.php';
           <label class="form-label">Notas</label>
           <input class="form-control" name="notas">
         </div>
-        <div class="col-md-4">
+        <div class="col-md-2">
           <label class="form-label">&nbsp;</label>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" name="incluye_iva" id="incluye_iva" checked>
             <label class="form-check-label" for="incluye_iva">
-              Incluir IVA (21%)
+              Incluir IVA
             </label>
           </div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Tasa IVA</label>
+          <select class="form-select" name="iva_rate" id="iva_rate">
+            <option value="21" selected>21%</option>
+            <option value="10.5">10,5%</option>
+          </select>
         </div>
       </div>
 
@@ -270,7 +283,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 
       <div class="text-end">
         <div><strong>Subtotal: $ <span id="subtotalSpan">0,00</span></strong></div>
-        <div><strong>IVA (21%): $ <span id="ivaSpan">0,00</span></strong></div>
+        <div><strong><span id="ivaLabel">IVA (21%)</span>: $ <span id="ivaSpan">0,00</span></strong></div>
         <div><strong>Total estimado: $ <span id="totalSpan">0,00</span></strong></div>
       </div>
     </div>
@@ -478,10 +491,13 @@ function updateTotal(){
     subtotal += (q*c);
   });
   let iva = 0;
+  const ivaRateSelect = document.getElementById('iva_rate');
+  const ivaRate = parseFloat(ivaRateSelect?.value || '21') || 21;
   if(document.getElementById('incluye_iva').checked){
-    iva = Math.round(subtotal * 0.21 * 100) / 100;
+    iva = Math.round(subtotal * (ivaRate / 100) * 100) / 100;
   }
   let total = subtotal + iva;
+  document.getElementById('ivaLabel').innerText = 'IVA (' + String(ivaRate).replace('.', ',') + '%)';
   document.getElementById('subtotalSpan').innerText = money(subtotal);
   document.getElementById('ivaSpan').innerText = money(iva);
   document.getElementById('totalSpan').innerText = money(total);
@@ -493,6 +509,7 @@ function escapeHtml(s){
 
 // Actualizar totales al cambiar el checkbox de IVA
 document.getElementById('incluye_iva').addEventListener('change', updateTotal);
+document.getElementById('iva_rate').addEventListener('change', updateTotal);
 
 // agrega una fila por defecto
 addItem();
