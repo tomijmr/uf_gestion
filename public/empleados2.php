@@ -8,6 +8,25 @@ require_once __DIR__ . '/../app/helpers.php';
 $flash_ok = '';
 $flash_err = '';
 
+$hasWeekAdjustments = true;
+try {
+    db()->exec("CREATE TABLE IF NOT EXISTS employee_week_adjustments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      employee_id INT NOT NULL,
+      week_start DATE NOT NULL,
+      week_end DATE NOT NULL,
+      hours_discount DECIMAL(8,2) NOT NULL DEFAULT 0,
+      reason VARCHAR(255) NULL,
+      created_by INT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_employee_week (employee_id, week_start, week_end),
+      KEY idx_week (week_start, week_end),
+      CONSTRAINT fk_ea_employee FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+} catch (Throwable $e) {
+    $hasWeekAdjustments = false;
+}
+
 $week_start = trim($_GET['week_start'] ?? '');
 if ($week_start === '') {
     $week_start = date('Y-m-d', strtotime('monday this week'));
@@ -199,7 +218,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hours = (float)$stmtH->fetchColumn();
             if ($hours <= 0) throw new Exception('No hay horas registradas en la semana.');
 
-            $gross = round($hours * $rate, 2);
+            $hours_discount = 0.0;
+            if ($hasWeekAdjustments) {
+              $stmtAdj = db()->prepare("SELECT COALESCE(hours_discount,0) FROM employee_week_adjustments
+                            WHERE employee_id=? AND week_start=? AND week_end=?");
+              $stmtAdj->execute([$employee_id, $week_start, $week_end]);
+              $hours_discount = max(0, (float)$stmtAdj->fetchColumn());
+            }
+            $hours_net = max(0, $hours - $hours_discount);
+            if ($hours_net <= 0) throw new Exception('Las horas netas a liquidar quedaron en 0. Revise el descuento semanal de horas.');
+
+            $gross = round($hours_net * $rate, 2);
 
             db()->beginTransaction();
             db()->prepare("INSERT INTO employee_payroll
@@ -221,7 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by)
                                VALUES (NOW(), 'SUELDOS', ?, ?, ?, ?)")
                     ->execute([
-                        'Pago semanal por horas - ' . $emp['nombre'] . ' ' . $emp['apellido'] . ' (' . $week_start . ' a ' . $week_end . ')',
+                    'Pago semanal por horas - ' . $emp['nombre'] . ' ' . $emp['apellido'] . ' (' . $week_start . ' a ' . $week_end . ') - Horas: ' . number_format($hours_net, 2, '.', '') . (($hours_discount > 0) ? (' (desc. ' . number_format($hours_discount, 2, '.', '') . 'h)') : ''),
                         $medio_pago,
                         $gross,
                         $userId
@@ -236,6 +265,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash_err = 'No se pudo liquidar: ' . $e->getMessage();
         }
     }
+
+        if ($action === 'set_week_hours_discount') {
+          $employee_id = (int)($_POST['employee_id'] ?? 0);
+          $hours_discount = max(0, (float)($_POST['hours_discount'] ?? 0));
+          $reason = trim($_POST['discount_reason'] ?? '');
+
+          try {
+            if (!$hasWeekAdjustments) throw new Exception('La funcionalidad de descuentos semanales no esta disponible en esta base de datos.');
+            if ($employee_id <= 0) throw new Exception('Empleado invalido.');
+
+            $stmtEmp = db()->prepare("SELECT id FROM employees WHERE id=? AND activo=1 LIMIT 1");
+            $stmtEmp->execute([$employee_id]);
+            if (!$stmtEmp->fetch()) throw new Exception('Empleado no encontrado.');
+
+            $userId = (int)(user()['id'] ?? 0);
+            db()->prepare("INSERT INTO employee_week_adjustments (employee_id, week_start, week_end, hours_discount, reason, created_by, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, NOW())
+                     ON DUPLICATE KEY UPDATE hours_discount=VALUES(hours_discount), reason=VALUES(reason), created_by=VALUES(created_by), updated_at=NOW()")
+              ->execute([$employee_id, $week_start, $week_end, $hours_discount, ($reason !== '' ? $reason : null), $userId ?: null]);
+
+            $flash_ok = 'Descuento semanal de horas actualizado.';
+          } catch (Throwable $e) {
+            $flash_err = 'No se pudo guardar el descuento semanal: ' . $e->getMessage();
+          }
+        }
 
         if ($action === 'reset_week_hours') {
           $employee_id = (int)($_POST['employee_id'] ?? 0);
@@ -263,6 +317,25 @@ $employees = db()->query("SELECT id, nombre, apellido, pago_por_hora, suspendido
 
 $attendanceMap = [];
 $weeklySummary = [];
+
+$weeklyAdjustments = [];
+if ($hasWeekAdjustments) {
+  try {
+    $stmtAdjWeek = db()->prepare("SELECT employee_id, hours_discount, reason
+                    FROM employee_week_adjustments
+                    WHERE week_start=? AND week_end=?");
+    $stmtAdjWeek->execute([$week_start, $week_end]);
+    foreach ($stmtAdjWeek->fetchAll() as $adj) {
+      $weeklyAdjustments[(int)$adj['employee_id']] = [
+        'hours_discount' => (float)($adj['hours_discount'] ?? 0),
+        'reason' => (string)($adj['reason'] ?? ''),
+      ];
+    }
+  } catch (Throwable $e) {
+    $hasWeekAdjustments = false;
+    $weeklyAdjustments = [];
+  }
+}
 
 foreach ($employees as $e) {
     $eid = (int)$e['id'];
@@ -300,8 +373,11 @@ foreach ($employees as $e) {
     $stmtH->execute([$eid, $week_start, $week_end]);
     $hours = (float)$stmtH->fetchColumn();
 
+    $hoursDiscount = (float)($weeklyAdjustments[$eid]['hours_discount'] ?? 0);
+    $hoursNet = max(0, $hours - $hoursDiscount);
+
     $rate = (float)($e['pago_por_hora'] ?? 0);
-    $gross = round($hours * $rate, 2);
+    $gross = round($hoursNet * $rate, 2);
 
     $stmtPaid = db()->prepare("SELECT COALESCE(SUM(sueldo_neto),0) FROM employee_payroll
                                WHERE employee_id=? AND semana_inicio=? AND semana_fin=? AND estado <> 'ANULADO'");
@@ -311,6 +387,9 @@ foreach ($employees as $e) {
     $weeklySummary[$eid] = [
         'hours' => $hours,
       'extras' => $extras,
+        'hours_discount' => $hoursDiscount,
+        'hours_net' => $hoursNet,
+        'discount_reason' => (string)($weeklyAdjustments[$eid]['reason'] ?? ''),
         'rate' => $rate,
         'gross' => $gross,
         'paid' => $paid,
@@ -332,6 +411,9 @@ include __DIR__ . '/../views/partials/navbar.php';
   <?php endif; ?>
   <?php if ($flash_err): ?>
     <div class="alert alert-danger"><?= e($flash_err) ?></div>
+  <?php endif; ?>
+  <?php if (!$hasWeekAdjustments): ?>
+    <div class="alert alert-warning">No se pudo inicializar la tabla de descuentos semanales. Se muestran empleados y liquidaciones sin descuentos de horas.</div>
   <?php endif; ?>
 
   <div class="card mb-3 shadow-sm">
@@ -411,6 +493,8 @@ include __DIR__ . '/../views/partials/navbar.php';
               <th class="text-end">H. extra</th>
               <th class="text-end">Horas</th>
               <th class="text-end">A liquidar</th>
+              <th class="text-end">Desc. hs</th>
+              <th class="text-end">Horas netas</th>
               <th class="text-end">Pagado</th>
               <th class="text-end">Pendiente</th>
               <th>Acciones</th>
@@ -418,13 +502,13 @@ include __DIR__ . '/../views/partials/navbar.php';
           </thead>
           <tbody>
             <?php if (!$employees): ?>
-              <tr><td colspan="13" class="text-center text-muted py-4">No hay empleados activos.</td></tr>
+              <tr><td colspan="17" class="text-center text-muted py-4">No hay empleados activos.</td></tr>
             <?php else: ?>
               <?php foreach ($employees as $e): ?>
                 <?php
                   $eid = (int)$e['id'];
-                  $sum = $weeklySummary[$eid] ?? ['hours'=>0,'extras'=>0,'rate'=>0,'gross'=>0,'paid'=>0,'pending'=>0];
-                  $disabled = ((int)$e['suspendido'] === 1 || (int)$e['en_licencia_medica'] === 1 || $sum['rate'] <= 0 || $sum['hours'] <= 0 || $sum['pending'] <= 0);
+                  $sum = $weeklySummary[$eid] ?? ['hours'=>0,'extras'=>0,'hours_discount'=>0,'hours_net'=>0,'discount_reason'=>'','rate'=>0,'gross'=>0,'paid'=>0,'pending'=>0];
+                  $disabled = ((int)$e['suspendido'] === 1 || (int)$e['en_licencia_medica'] === 1 || $sum['rate'] <= 0 || $sum['hours_net'] <= 0 || $sum['pending'] <= 0);
                 ?>
                 <tr>
                   <td>
@@ -457,6 +541,8 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <td class="text-end text-primary fw-semibold"><?= e(number_format((float)$sum['extras'], 2, ',', '.')) ?></td>
                   <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours'], 2, ',', '.')) ?></td>
                   <td class="text-end"><?= e(money($sum['gross'])) ?></td>
+                  <td class="text-end text-danger fw-semibold"><?= e(number_format((float)$sum['hours_discount'], 2, ',', '.')) ?></td>
+                  <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours_net'], 2, ',', '.')) ?></td>
                   <td class="text-end"><?= e(money($sum['paid'])) ?></td>
                   <td class="text-end <?= $sum['pending'] > 0 ? 'text-danger fw-semibold' : 'text-success' ?>"><?= e(money($sum['pending'])) ?></td>
                   <td style="min-width:240px;">
@@ -481,6 +567,19 @@ include __DIR__ . '/../views/partials/navbar.php';
                       <input type="hidden" name="action" value="reset_week_hours">
                       <input type="hidden" name="employee_id" value="<?= $eid ?>">
                       <button class="btn btn-sm btn-outline-danger w-100" <?= ((float)$sum['hours'] <= 0) ? 'disabled' : '' ?>>Reset semana</button>
+                    </form>
+                    <form method="post" class="row g-1 mt-1">
+                      <input type="hidden" name="action" value="set_week_hours_discount">
+                      <input type="hidden" name="employee_id" value="<?= $eid ?>">
+                      <div class="col-4">
+                        <input type="number" step="0.25" min="0" name="hours_discount" class="form-control form-control-sm" value="<?= e(number_format((float)$sum['hours_discount'], 2, '.', '')) ?>" title="Horas a descontar en la semana">
+                      </div>
+                      <div class="col-5">
+                        <input type="text" name="discount_reason" class="form-control form-control-sm" value="<?= e($sum['discount_reason']) ?>" placeholder="Motivo">
+                      </div>
+                      <div class="col-3 d-grid">
+                        <button class="btn btn-sm btn-outline-secondary">Desc.</button>
+                      </div>
                     </form>
                   </td>
                 </tr>
