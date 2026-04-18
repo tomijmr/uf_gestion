@@ -461,11 +461,37 @@ foreach ($employees as $e) {
     ];
 }
 
-$totalCols = 11 + count($days);
+$totalCols = 12;
 
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
 ?>
+
+<style>
+  .attendance-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 420px;
+  }
+  .attendance-chip {
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+    white-space: nowrap;
+  }
+  .attendance-chip.has-att {
+    background: #e8f5e9;
+    border-color: #b7dfbf;
+  }
+  .attendance-chip.no-att {
+    background: #fff;
+    color: #6c757d;
+  }
+</style>
 
 <div class="container-fluid py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
@@ -594,9 +620,7 @@ include __DIR__ . '/../views/partials/navbar.php';
             <tr>
               <th>Empleado</th>
               <th>Valor hora</th>
-              <?php foreach ($days as $d): ?>
-                <th class="text-center"><?= e(date('d/m', strtotime($d))) ?></th>
-              <?php endforeach; ?>
+              <th>Asistencia del mes</th>
               <th class="text-end">H. extra</th>
               <th class="text-end">Horas</th>
               <th class="text-end">Desc. hs</th>
@@ -632,20 +656,30 @@ include __DIR__ . '/../views/partials/navbar.php';
                       <button class="btn btn-sm btn-outline-primary">OK</button>
                     </form>
                   </td>
-                  <?php foreach ($days as $d): ?>
-                    <?php $a = $attendanceMap[$eid][$d] ?? null; ?>
-                    <td class="text-center small">
-                      <?php if (!$a): ?>
-                        -
-                      <?php else: ?>
-                        <?= $a['ingreso_manana'] ? 'M' : '' ?><?= ($a['ingreso_manana'] && $a['ingreso_tarde']) ? '+' : '' ?><?= $a['ingreso_tarde'] ? 'T' : '' ?>
-                        <div class="text-muted"><?= e(number_format((float)$a['horas_trabajadas'], 1, '.', '')) ?>h</div>
-                        <?php if ((float)($a['horas_extras'] ?? 0) > 0): ?>
-                          <div class="text-primary">+<?= e(number_format((float)$a['horas_extras'], 1, '.', '')) ?>h</div>
+                  <td>
+                    <div class="attendance-grid">
+                      <?php foreach ($days as $d): ?>
+                        <?php $a = $attendanceMap[$eid][$d] ?? null; ?>
+                        <?php if (!$a): ?>
+                          <span class="attendance-chip no-att"><?= e(date('d', strtotime($d))) ?>:-</span>
+                        <?php else: ?>
+                          <?php
+                            $turnoTxt = ($a['ingreso_manana'] ? 'M' : '')
+                              . (($a['ingreso_manana'] && $a['ingreso_tarde']) ? '+' : '')
+                              . ($a['ingreso_tarde'] ? 'T' : '');
+                            if ($turnoTxt === '') $turnoTxt = 'A';
+                            $horasTxt = number_format((float)$a['horas_trabajadas'], 1, '.', '') . 'h';
+                            $extraTxt = ((float)($a['horas_extras'] ?? 0) > 0)
+                              ? (' | +' . number_format((float)$a['horas_extras'], 1, '.', '') . 'h')
+                              : '';
+                          ?>
+                          <span class="attendance-chip has-att" title="<?= e(date('d/m/Y', strtotime($d)) . ' - ' . $horasTxt . $extraTxt) ?>">
+                            <?= e(date('d', strtotime($d))) ?>:<?= e($turnoTxt) ?>
+                          </span>
                         <?php endif; ?>
-                      <?php endif; ?>
-                    </td>
-                  <?php endforeach; ?>
+                      <?php endforeach; ?>
+                    </div>
+                  </td>
                   <td class="text-end text-primary fw-semibold"><?= e(number_format((float)$sum['extras'], 2, ',', '.')) ?></td>
                   <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours'], 2, ',', '.')) ?></td>
                   <td class="text-end text-danger fw-semibold" title="<?= e($sum['discount_reason']) ?>"><?= e(number_format((float)$sum['hours_discount'], 2, ',', '.')) ?></td>
