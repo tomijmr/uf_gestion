@@ -8,51 +8,53 @@ require_once __DIR__ . '/../app/helpers.php';
 $flash_ok = '';
 $flash_err = '';
 
-$hasWeekAdjustments = true;
+$hasMonthAdjustments = true;
 try {
-    db()->exec("CREATE TABLE IF NOT EXISTS employee_week_adjustments (
+    db()->exec("CREATE TABLE IF NOT EXISTS employee_month_adjustments (
       id INT AUTO_INCREMENT PRIMARY KEY,
       employee_id INT NOT NULL,
-      week_start DATE NOT NULL,
-      week_end DATE NOT NULL,
+      month_start DATE NOT NULL,
+      month_end DATE NOT NULL,
       hours_discount DECIMAL(8,2) NOT NULL DEFAULT 0,
       reason VARCHAR(255) NULL,
       created_by INT NULL,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uniq_employee_week (employee_id, week_start, week_end),
-      KEY idx_week (week_start, week_end),
-      CONSTRAINT fk_ea_employee FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+      UNIQUE KEY uniq_employee_month (employee_id, month_start, month_end),
+      KEY idx_month (month_start, month_end),
+      CONSTRAINT fk_ema_employee FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 } catch (Throwable $e) {
-    $hasWeekAdjustments = false;
+    $hasMonthAdjustments = false;
 }
 
-$week_start = trim($_GET['week_start'] ?? '');
-if ($week_start === '') {
-    $week_start = date('Y-m-d', strtotime('monday this week'));
+$period_month = trim($_GET['period_month'] ?? date('Y-m'));
+if (!preg_match('/^\d{4}-\d{2}$/', $period_month)) {
+    $period_month = date('Y-m');
 }
-$week_ts = strtotime($week_start);
-if ($week_ts === false) {
-    $week_start = date('Y-m-d', strtotime('monday this week'));
-    $week_ts = strtotime($week_start);
+$period_start = $period_month . '-01';
+$period_start_ts = strtotime($period_start);
+if ($period_start_ts === false) {
+    $period_start = date('Y-m-01');
+    $period_start_ts = strtotime($period_start);
 }
-$week_start = date('Y-m-d', $week_ts);
-$week_end = date('Y-m-d', strtotime($week_start . ' +6 day'));
+$period_start = date('Y-m-01', $period_start_ts);
+$period_end = date('Y-m-t', strtotime($period_start));
 
 $days = [];
-for ($i = 0; $i < 7; $i++) {
-    $d = date('Y-m-d', strtotime($week_start . " +$i day"));
+$days_count = (int)date('t', strtotime($period_start));
+for ($i = 0; $i < $days_count; $i++) {
+    $d = date('Y-m-d', strtotime($period_start . " +$i day"));
     $days[] = $d;
 }
 
 $attendanceCols = [];
 try {
-  $cols = db()->query("SHOW COLUMNS FROM employee_attendance")->fetchAll();
-  foreach ($cols as $c) {
-    $attendanceCols[(string)$c['Field']] = true;
-  }
+    $cols = db()->query("SHOW COLUMNS FROM employee_attendance")->fetchAll();
+    foreach ($cols as $c) {
+        $attendanceCols[(string)$c['Field']] = true;
+    }
 } catch (Throwable $e) {
-  $attendanceCols = [];
+    $attendanceCols = [];
 }
 
 $hasIngresoManana = isset($attendanceCols['ingreso_manana']);
@@ -99,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fecha = trim($_POST['fecha'] ?? '');
         $turno_manana = isset($_POST['turno_manana']) ? 1 : 0;
         $turno_tarde = isset($_POST['turno_tarde']) ? 1 : 0;
-      $horas_extras = max(0, (float)($_POST['horas_extras'] ?? 0));
+        $horas_extras = max(0, (float)($_POST['horas_extras'] ?? 0));
         $notas = trim($_POST['notas'] ?? '');
 
         try {
@@ -120,51 +122,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $insertVals = [$employee_id, $fecha, $presente, 0, $notas ?: null];
 
             if ($hasIngresoManana) {
-              $insertCols[] = 'ingreso_manana';
-              $insertVals[] = $ingreso_manana;
+                $insertCols[] = 'ingreso_manana';
+                $insertVals[] = $ingreso_manana;
             }
             if ($hasIngresoTarde) {
-              $insertCols[] = 'ingreso_tarde';
-              $insertVals[] = $ingreso_tarde;
+                $insertCols[] = 'ingreso_tarde';
+                $insertVals[] = $ingreso_tarde;
             }
             if ($hasHorasExtras) {
-              $insertCols[] = 'horas_extras';
-              $insertVals[] = $horas_extras;
+                $insertCols[] = 'horas_extras';
+                $insertVals[] = $horas_extras;
             }
             if ($hasHorasTrabajadas) {
-              $insertCols[] = 'horas_trabajadas';
-              $insertVals[] = $horas_trabajadas;
+                $insertCols[] = 'horas_trabajadas';
+                $insertVals[] = $horas_trabajadas;
             }
             if ($hasTurno) {
-              $insertCols[] = 'turno';
-              $insertVals[] = $turno;
+                $insertCols[] = 'turno';
+                $insertVals[] = $turno;
             }
             if ($hasHorarioEntrada) {
-              $insertCols[] = 'horario_entrada';
-              $insertVals[] = $horario_entrada;
+                $insertCols[] = 'horario_entrada';
+                $insertVals[] = $horario_entrada;
             }
             if ($hasHoraEntrada) {
-              $insertCols[] = 'hora_entrada';
-              $insertVals[] = $horario_entrada ? ($horario_entrada . ':00') : null;
+                $insertCols[] = 'hora_entrada';
+                $insertVals[] = $horario_entrada ? ($horario_entrada . ':00') : null;
             }
             if ($hasHoraSalida) {
-              $horaSalida = null;
-              if ($turno_manana && $turno_tarde) $horaSalida = '17:00:00';
-              elseif ($turno_manana) $horaSalida = '12:00:00';
-              elseif ($turno_tarde) $horaSalida = '17:00:00';
-              $insertCols[] = 'hora_salida';
-              $insertVals[] = $horaSalida;
+                $horaSalida = null;
+                if ($turno_manana && $turno_tarde) $horaSalida = '17:00:00';
+                elseif ($turno_manana) $horaSalida = '12:00:00';
+                elseif ($turno_tarde) $horaSalida = '17:00:00';
+                $insertCols[] = 'hora_salida';
+                $insertVals[] = $horaSalida;
             }
 
-            // Normaliza 1 registro por empleado/fecha para evitar acumulaciones por turnos anteriores.
             db()->prepare("DELETE FROM employee_attendance WHERE employee_id=? AND fecha=?")
               ->execute([$employee_id, $fecha]);
 
             $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
             $updates = [];
             foreach ($insertCols as $col) {
-              if ($col === 'employee_id' || $col === 'fecha') continue;
-              $updates[] = $col . '=VALUES(' . $col . ')';
+                if ($col === 'employee_id' || $col === 'fecha') continue;
+                $updates[] = $col . '=VALUES(' . $col . ')';
             }
 
             $sqlAttendance = 'INSERT INTO employee_attendance (' . implode(', ', $insertCols) . ') '
@@ -179,7 +180,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'liquidar_semana') {
+    if ($action === 'set_month_hours_discount') {
+        $employee_id = (int)($_POST['employee_id'] ?? 0);
+        $hours_discount = max(0, (float)($_POST['hours_discount'] ?? 0));
+        $reason = trim($_POST['discount_reason'] ?? '');
+
+        try {
+            if (!$hasMonthAdjustments) throw new Exception('La funcionalidad de descuentos mensuales no esta disponible en esta base de datos.');
+            if ($employee_id <= 0) throw new Exception('Empleado invalido.');
+
+            $stmtEmp = db()->prepare("SELECT id FROM employees WHERE id=? AND activo=1 LIMIT 1");
+            $stmtEmp->execute([$employee_id]);
+            if (!$stmtEmp->fetch()) throw new Exception('Empleado no encontrado.');
+
+            $userId = (int)(user()['id'] ?? 0);
+            db()->prepare("INSERT INTO employee_month_adjustments (employee_id, month_start, month_end, hours_discount, reason, created_by, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, NOW())
+                           ON DUPLICATE KEY UPDATE hours_discount=VALUES(hours_discount), reason=VALUES(reason), created_by=VALUES(created_by), updated_at=NOW()")
+                ->execute([$employee_id, $period_start, $period_end, $hours_discount, ($reason !== '' ? $reason : null), $userId ?: null]);
+
+            $flash_ok = 'Descuento mensual de horas actualizado.';
+        } catch (Throwable $e) {
+            $flash_err = 'No se pudo guardar el descuento mensual: ' . $e->getMessage();
+        }
+    }
+
+    if ($action === 'registrar_adelanto') {
+        $employee_id = (int)($_POST['employee_id'] ?? 0);
+        $monto = max(0, (float)($_POST['monto'] ?? 0));
+        $razon = trim($_POST['razon'] ?? '');
+        $medio_pago = trim($_POST['medio_pago'] ?? 'EFECTIVO');
+        $fecha_adelanto = trim($_POST['fecha_adelanto'] ?? date('Y-m-d'));
+
+        try {
+            if ($employee_id <= 0) throw new Exception('Empleado invalido.');
+            if ($monto <= 0) throw new Exception('El monto del adelanto debe ser mayor a 0.');
+            if ($fecha_adelanto === '' || !strtotime($fecha_adelanto)) throw new Exception('Fecha de adelanto invalida.');
+
+            $stmtEmp = db()->prepare("SELECT nombre, apellido FROM employees WHERE id=? AND activo=1 LIMIT 1");
+            $stmtEmp->execute([$employee_id]);
+            $emp = $stmtEmp->fetch();
+            if (!$emp) throw new Exception('Empleado no encontrado.');
+
+            db()->beginTransaction();
+
+            db()->prepare("INSERT INTO employee_advances (employee_id, monto, fecha_solicitud, fecha_aprobacion, razon, estado)
+                           VALUES (?, ?, ?, ?, ?, 'APROBADO')")
+                ->execute([$employee_id, $monto, $fecha_adelanto, $fecha_adelanto, ($razon !== '' ? $razon : null)]);
+
+            $userId = (int)(user()['id'] ?? 0);
+            $descripcion = 'Adelanto de sueldo - ' . $emp['nombre'] . ' ' . $emp['apellido'];
+            if ($razon !== '') $descripcion .= ' (' . $razon . ')';
+
+            db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by)
+                           VALUES (?, 'SUELDOS', ?, ?, ?, ?)")
+                ->execute([$fecha_adelanto . ' ' . date('H:i:s'), $descripcion, $medio_pago, $monto, $userId]);
+
+            db()->commit();
+            $flash_ok = 'Adelanto registrado correctamente.';
+        } catch (Throwable $e) {
+            if (db()->inTransaction()) db()->rollBack();
+            $flash_err = 'No se pudo registrar el adelanto: ' . $e->getMessage();
+        }
+    }
+
+    if ($action === 'liquidar_mes') {
         $employee_id = (int)($_POST['employee_id'] ?? 0);
         $medio_pago = trim($_POST['medio_pago'] ?? 'EFECTIVO');
         $fecha_pago = trim($_POST['fecha_pago'] ?? date('Y-m-d'));
@@ -199,13 +264,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $rate = (float)($emp['pago_por_hora'] ?? 0);
             if ($rate <= 0) throw new Exception('Debe cargar valor por hora antes de liquidar.');
 
-            $stmtDup = db()->prepare("SELECT COUNT(*) FROM employee_payroll
-                                      WHERE employee_id=? AND semana_inicio=? AND semana_fin=? AND estado <> 'ANULADO'");
-            $stmtDup->execute([$employee_id, $week_start, $week_end]);
-            if ((int)$stmtDup->fetchColumn() > 0) {
-                throw new Exception('Ya existe una liquidacion para este empleado en esa semana.');
-            }
-
             $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExprSql),0)
                                     FROM employee_attendance a
                                     INNER JOIN (
@@ -214,86 +272,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                       WHERE employee_id=? AND fecha BETWEEN ? AND ?
                                       GROUP BY fecha
                                     ) latest ON latest.id = a.id");
-            $stmtH->execute([$employee_id, $week_start, $week_end]);
+            $stmtH->execute([$employee_id, $period_start, $period_end]);
             $hours = (float)$stmtH->fetchColumn();
-            if ($hours <= 0) throw new Exception('No hay horas registradas en la semana.');
+            if ($hours <= 0) throw new Exception('No hay horas registradas en el mes.');
 
             $hours_discount = 0.0;
-            if ($hasWeekAdjustments) {
-              $stmtAdj = db()->prepare("SELECT COALESCE(hours_discount,0) FROM employee_week_adjustments
-                            WHERE employee_id=? AND week_start=? AND week_end=?");
-              $stmtAdj->execute([$employee_id, $week_start, $week_end]);
-              $hours_discount = max(0, (float)$stmtAdj->fetchColumn());
+            if ($hasMonthAdjustments) {
+                $stmtAdj = db()->prepare("SELECT COALESCE(hours_discount,0) FROM employee_month_adjustments
+                                         WHERE employee_id=? AND month_start=? AND month_end=?");
+                $stmtAdj->execute([$employee_id, $period_start, $period_end]);
+                $hours_discount = max(0, (float)$stmtAdj->fetchColumn());
             }
             $hours_net = max(0, $hours - $hours_discount);
-            if ($hours_net <= 0) throw new Exception('Las horas netas a liquidar quedaron en 0. Revise el descuento semanal de horas.');
+            if ($hours_net <= 0) throw new Exception('Las horas netas a liquidar quedaron en 0. Revise el descuento mensual de horas.');
 
             $gross = round($hours_net * $rate, 2);
 
+            $stmtAdv = db()->prepare("SELECT COALESCE(SUM(monto),0)
+                                     FROM employee_advances
+                                     WHERE employee_id=? AND estado='APROBADO' AND fecha_solicitud BETWEEN ? AND ?");
+            $stmtAdv->execute([$employee_id, $period_start, $period_end]);
+            $advances_total = (float)$stmtAdv->fetchColumn();
+
+            $base_to_pay = max(0, round($gross - $advances_total, 2));
+
+            $stmtPaid = db()->prepare("SELECT COALESCE(SUM(sueldo_neto),0)
+                                      FROM employee_payroll
+                                      WHERE employee_id=? AND semana_inicio=? AND semana_fin=? AND estado <> 'ANULADO'");
+            $stmtPaid->execute([$employee_id, $period_start, $period_end]);
+            $already_paid = (float)$stmtPaid->fetchColumn();
+
+            $pending = max(0, round($base_to_pay - $already_paid, 2));
+            if ($pending <= 0) throw new Exception('El mes ya se encuentra liquidado para este empleado.');
+
             db()->beginTransaction();
+
             db()->prepare("INSERT INTO employee_payroll
                 (employee_id, fecha_pago, semana_inicio, semana_fin, sueldo_base, descuentos_total, adelantos_total, prestamos_cuota, sueldo_neto, medio_pago, estado, notas)
-                VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, 'PAGADO', ?)")
+                VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 'PAGADO', ?)")
                 ->execute([
                     $employee_id,
                     $fecha_pago,
-                    $week_start,
-                    $week_end,
+                    $period_start,
+                    $period_end,
                     $gross,
-                    $gross,
+                    $advances_total,
+                    $pending,
                     $medio_pago,
-                    'Liquidacion semanal por horas'
+                    'Liquidacion mensual por horas'
                 ]);
 
+            db()->prepare("UPDATE employee_advances
+                           SET estado='DESCONTADO'
+                           WHERE employee_id=? AND estado='APROBADO' AND fecha_solicitud BETWEEN ? AND ?")
+                ->execute([$employee_id, $period_start, $period_end]);
+
             $userId = (int)(user()['id'] ?? 0);
-            try {
-                db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by)
-                               VALUES (NOW(), 'SUELDOS', ?, ?, ?, ?)")
-                    ->execute([
-                    'Pago semanal por horas - ' . $emp['nombre'] . ' ' . $emp['apellido'] . ' (' . $week_start . ' a ' . $week_end . ') - Horas: ' . number_format($hours_net, 2, '.', '') . (($hours_discount > 0) ? (' (desc. ' . number_format($hours_discount, 2, '.', '') . 'h)') : ''),
-                        $medio_pago,
-                        $gross,
-                        $userId
-                    ]);
-            } catch (Throwable $ignored) {
-            }
+            $descripcion = 'Pago mensual por horas - ' . $emp['nombre'] . ' ' . $emp['apellido']
+                . ' (' . $period_start . ' a ' . $period_end . ')'
+                . ' - Horas netas: ' . number_format($hours_net, 2, '.', '')
+                . ($advances_total > 0 ? (' - Adelantos: ' . number_format($advances_total, 2, '.', '')) : '');
+
+            db()->prepare("INSERT INTO cash_expenses (fecha, categoria, descripcion, medio, importe, created_by)
+                           VALUES (?, 'SUELDOS', ?, ?, ?, ?)")
+                ->execute([$fecha_pago . ' ' . date('H:i:s'), $descripcion, $medio_pago, $pending, $userId]);
 
             db()->commit();
-            $flash_ok = 'Liquidacion semanal registrada correctamente.';
+            $flash_ok = 'Liquidacion mensual registrada correctamente.';
         } catch (Throwable $e) {
             if (db()->inTransaction()) db()->rollBack();
             $flash_err = 'No se pudo liquidar: ' . $e->getMessage();
         }
     }
 
-        if ($action === 'set_week_hours_discount') {
-          $employee_id = (int)($_POST['employee_id'] ?? 0);
-          $hours_discount = max(0, (float)($_POST['hours_discount'] ?? 0));
-          $reason = trim($_POST['discount_reason'] ?? '');
-
-          try {
-            if (!$hasWeekAdjustments) throw new Exception('La funcionalidad de descuentos semanales no esta disponible en esta base de datos.');
-            if ($employee_id <= 0) throw new Exception('Empleado invalido.');
-
-            $stmtEmp = db()->prepare("SELECT id FROM employees WHERE id=? AND activo=1 LIMIT 1");
-            $stmtEmp->execute([$employee_id]);
-            if (!$stmtEmp->fetch()) throw new Exception('Empleado no encontrado.');
-
-            $userId = (int)(user()['id'] ?? 0);
-            db()->prepare("INSERT INTO employee_week_adjustments (employee_id, week_start, week_end, hours_discount, reason, created_by, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, NOW())
-                     ON DUPLICATE KEY UPDATE hours_discount=VALUES(hours_discount), reason=VALUES(reason), created_by=VALUES(created_by), updated_at=NOW()")
-              ->execute([$employee_id, $week_start, $week_end, $hours_discount, ($reason !== '' ? $reason : null), $userId ?: null]);
-
-            $flash_ok = 'Descuento semanal de horas actualizado.';
-          } catch (Throwable $e) {
-            $flash_err = 'No se pudo guardar el descuento semanal: ' . $e->getMessage();
-          }
-        }
-
-        if ($action === 'reset_week_hours') {
-          $employee_id = (int)($_POST['employee_id'] ?? 0);
-          try {
+    if ($action === 'reset_month_hours') {
+        $employee_id = (int)($_POST['employee_id'] ?? 0);
+        try {
             if ($employee_id <= 0) throw new Exception('Empleado invalido.');
 
             $stmtEmp = db()->prepare("SELECT nombre, apellido FROM employees WHERE id=? LIMIT 1");
@@ -302,45 +356,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$emp) throw new Exception('Empleado no encontrado.');
 
             $stmtDel = db()->prepare("DELETE FROM employee_attendance WHERE employee_id=? AND fecha BETWEEN ? AND ?");
-            $stmtDel->execute([$employee_id, $week_start, $week_end]);
+            $stmtDel->execute([$employee_id, $period_start, $period_end]);
             $deleted = (int)$stmtDel->rowCount();
 
-            $flash_ok = 'Semana reiniciada para ' . $emp['nombre'] . ' ' . $emp['apellido'] . '. Registros eliminados: ' . $deleted . '.';
-          } catch (Throwable $e) {
-            $flash_err = 'No se pudo resetear la semana: ' . $e->getMessage();
-          }
+            $flash_ok = 'Mes reiniciado para ' . $emp['nombre'] . ' ' . $emp['apellido'] . '. Registros eliminados: ' . $deleted . '.';
+        } catch (Throwable $e) {
+            $flash_err = 'No se pudo resetear el mes: ' . $e->getMessage();
         }
+    }
 }
 
 $employees = db()->query("SELECT id, nombre, apellido, pago_por_hora, suspendido, en_licencia_medica
                           FROM employees WHERE activo=1 ORDER BY nombre, apellido")->fetchAll();
 
 $attendanceMap = [];
-$weeklySummary = [];
+$monthlySummary = [];
 
-$weeklyAdjustments = [];
-if ($hasWeekAdjustments) {
-  try {
-    $stmtAdjWeek = db()->prepare("SELECT employee_id, hours_discount, reason
-                    FROM employee_week_adjustments
-                    WHERE week_start=? AND week_end=?");
-    $stmtAdjWeek->execute([$week_start, $week_end]);
-    foreach ($stmtAdjWeek->fetchAll() as $adj) {
-      $weeklyAdjustments[(int)$adj['employee_id']] = [
-        'hours_discount' => (float)($adj['hours_discount'] ?? 0),
-        'reason' => (string)($adj['reason'] ?? ''),
-      ];
+$monthlyAdjustments = [];
+if ($hasMonthAdjustments) {
+    try {
+        $stmtAdjMonth = db()->prepare("SELECT employee_id, hours_discount, reason
+                                       FROM employee_month_adjustments
+                                       WHERE month_start=? AND month_end=?");
+        $stmtAdjMonth->execute([$period_start, $period_end]);
+        foreach ($stmtAdjMonth->fetchAll() as $adj) {
+            $monthlyAdjustments[(int)$adj['employee_id']] = [
+                'hours_discount' => (float)($adj['hours_discount'] ?? 0),
+                'reason' => (string)($adj['reason'] ?? ''),
+            ];
+        }
+    } catch (Throwable $e) {
+        $hasMonthAdjustments = false;
+        $monthlyAdjustments = [];
     }
-  } catch (Throwable $e) {
-    $hasWeekAdjustments = false;
-    $weeklyAdjustments = [];
-  }
 }
 
 foreach ($employees as $e) {
     $eid = (int)$e['id'];
 
-  $latestByDaySql = "FROM employee_attendance a
+    $latestByDaySql = "FROM employee_attendance a
               INNER JOIN (
                 SELECT MAX(id) AS id
                 FROM employee_attendance
@@ -348,14 +402,14 @@ foreach ($employees as $e) {
                 GROUP BY fecha
               ) latest ON latest.id = a.id";
 
-  $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
-  $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
-  $selHorasExtras = $hasHorasExtras ? 'COALESCE(horas_extras,0) AS horas_extras' : '0 AS horas_extras';
-  $selHorasTrabajadas = $hoursExprSql . ' AS horas_trabajadas';
+    $selIngresoManana = $hasIngresoManana ? 'ingreso_manana' : 'NULL AS ingreso_manana';
+    $selIngresoTarde = $hasIngresoTarde ? 'ingreso_tarde' : 'NULL AS ingreso_tarde';
+    $selHorasExtras = $hasHorasExtras ? 'COALESCE(horas_extras,0) AS horas_extras' : '0 AS horas_extras';
+    $selHorasTrabajadas = $hoursExprSql . ' AS horas_trabajadas';
 
-  $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasExtras, $selHorasTrabajadas, notas
-              $latestByDaySql");
-    $stmtA->execute([$eid, $week_start, $week_end]);
+    $stmtA = db()->prepare("SELECT fecha, $selIngresoManana, $selIngresoTarde, $selHorasExtras, $selHorasTrabajadas, notas
+                            $latestByDaySql");
+    $stmtA->execute([$eid, $period_start, $period_end]);
     $rowsA = $stmtA->fetchAll();
 
     $attendanceMap[$eid] = [];
@@ -364,38 +418,50 @@ foreach ($employees as $e) {
     }
 
     $stmtExtra = db()->prepare("SELECT COALESCE(SUM($extraExprSql),0)
-                  $latestByDaySql");
-    $stmtExtra->execute([$eid, $week_start, $week_end]);
+                                $latestByDaySql");
+    $stmtExtra->execute([$eid, $period_start, $period_end]);
     $extras = (float)$stmtExtra->fetchColumn();
 
     $stmtH = db()->prepare("SELECT COALESCE(SUM($hoursExprSql),0)
-                $latestByDaySql");
-    $stmtH->execute([$eid, $week_start, $week_end]);
+                            $latestByDaySql");
+    $stmtH->execute([$eid, $period_start, $period_end]);
     $hours = (float)$stmtH->fetchColumn();
 
-    $hoursDiscount = (float)($weeklyAdjustments[$eid]['hours_discount'] ?? 0);
+    $hoursDiscount = (float)($monthlyAdjustments[$eid]['hours_discount'] ?? 0);
     $hoursNet = max(0, $hours - $hoursDiscount);
 
     $rate = (float)($e['pago_por_hora'] ?? 0);
     $gross = round($hoursNet * $rate, 2);
 
+    $stmtAdv = db()->prepare("SELECT COALESCE(SUM(monto),0)
+                             FROM employee_advances
+                             WHERE employee_id=? AND estado='APROBADO' AND fecha_solicitud BETWEEN ? AND ?");
+    $stmtAdv->execute([$eid, $period_start, $period_end]);
+    $advances = (float)$stmtAdv->fetchColumn();
+
+    $baseToPay = max(0, round($gross - $advances, 2));
+
     $stmtPaid = db()->prepare("SELECT COALESCE(SUM(sueldo_neto),0) FROM employee_payroll
                                WHERE employee_id=? AND semana_inicio=? AND semana_fin=? AND estado <> 'ANULADO'");
-    $stmtPaid->execute([$eid, $week_start, $week_end]);
+    $stmtPaid->execute([$eid, $period_start, $period_end]);
     $paid = (float)$stmtPaid->fetchColumn();
 
-    $weeklySummary[$eid] = [
+    $monthlySummary[$eid] = [
         'hours' => $hours,
-      'extras' => $extras,
+        'extras' => $extras,
         'hours_discount' => $hoursDiscount,
         'hours_net' => $hoursNet,
-        'discount_reason' => (string)($weeklyAdjustments[$eid]['reason'] ?? ''),
+        'discount_reason' => (string)($monthlyAdjustments[$eid]['reason'] ?? ''),
         'rate' => $rate,
         'gross' => $gross,
+        'advances' => $advances,
+        'to_pay' => $baseToPay,
         'paid' => $paid,
-        'pending' => round(max(0, $gross - $paid), 2),
+        'pending' => round(max(0, $baseToPay - $paid), 2),
     ];
 }
+
+$totalCols = 11 + count($days);
 
 include __DIR__ . '/../views/partials/header.php';
 include __DIR__ . '/../views/partials/navbar.php';
@@ -403,7 +469,7 @@ include __DIR__ . '/../views/partials/navbar.php';
 
 <div class="container-fluid py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="mb-0">Empleados2 - Asistencia y pagos semanales por hora</h5>
+    <h5 class="mb-0">Empleados2 - Asistencia y liquidacion mensual por hora</h5>
   </div>
 
   <?php if ($flash_ok): ?>
@@ -412,26 +478,26 @@ include __DIR__ . '/../views/partials/navbar.php';
   <?php if ($flash_err): ?>
     <div class="alert alert-danger"><?= e($flash_err) ?></div>
   <?php endif; ?>
-  <?php if (!$hasWeekAdjustments): ?>
-    <div class="alert alert-warning">No se pudo inicializar la tabla de descuentos semanales. Se muestran empleados y liquidaciones sin descuentos de horas.</div>
+  <?php if (!$hasMonthAdjustments): ?>
+    <div class="alert alert-warning">No se pudo inicializar la tabla de descuentos mensuales. Se muestran empleados y liquidaciones sin descuentos de horas.</div>
   <?php endif; ?>
 
   <div class="card mb-3 shadow-sm">
     <div class="card-body">
       <form method="get" class="row g-2 align-items-end">
         <div class="col-md-3">
-          <label class="form-label">Semana (inicio)</label>
-          <input type="date" name="week_start" class="form-control" value="<?= e($week_start) ?>">
+          <label class="form-label">Mes de liquidacion</label>
+          <input type="month" name="period_month" class="form-control" value="<?= e($period_month) ?>">
         </div>
         <div class="col-md-3">
-          <label class="form-label">Semana (fin)</label>
-          <input type="text" class="form-control" value="<?= e($week_end) ?>" readonly>
+          <label class="form-label">Rango</label>
+          <input type="text" class="form-control" value="<?= e($period_start . ' a ' . $period_end) ?>" readonly>
         </div>
         <div class="col-md-2 d-grid">
-          <button class="btn btn-outline-primary">Ver semana</button>
+          <button class="btn btn-outline-primary">Ver mes</button>
         </div>
         <div class="col-md-4 small text-muted">
-          Turnos fijos: manana 08:00-12:00 (4h) y tarde 13:00-17:00 (4h).
+          Control de asistencia diario con liquidacion mensual.
         </div>
       </form>
     </div>
@@ -463,13 +529,13 @@ include __DIR__ . '/../views/partials/navbar.php';
           <label class="form-label d-block">Turno tarde</label>
           <input type="checkbox" name="turno_tarde" value="1"> 13-17
         </div>
-        <div class="col-md-2">
-          <label class="form-label">Horas extra</label>
+        <div class="col-md-1">
+          <label class="form-label">H. extra</label>
           <input type="number" step="0.25" min="0" name="horas_extras" class="form-control" value="0">
         </div>
-        <div class="col-md-2">
+        <div class="col-md-1">
           <label class="form-label">Notas</label>
-          <input type="text" name="notas" class="form-control" placeholder="Opcional">
+          <input type="text" name="notas" class="form-control" placeholder="Opc.">
         </div>
         <div class="col-md-1 d-grid">
           <button class="btn btn-primary">Guardar</button>
@@ -478,8 +544,49 @@ include __DIR__ . '/../views/partials/navbar.php';
     </div>
   </div>
 
+  <div class="card mb-3 shadow-sm">
+    <div class="card-header">Registrar adelanto de sueldo</div>
+    <div class="card-body">
+      <form method="post" class="row g-2 align-items-end">
+        <input type="hidden" name="action" value="registrar_adelanto">
+        <div class="col-md-3">
+          <label class="form-label">Empleado</label>
+          <select name="employee_id" class="form-select" required>
+            <option value="">Seleccionar...</option>
+            <?php foreach ($employees as $e): ?>
+              <option value="<?= (int)$e['id'] ?>"><?= e($e['nombre'] . ' ' . $e['apellido']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Fecha</label>
+          <input type="date" name="fecha_adelanto" class="form-control" value="<?= e(date('Y-m-d')) ?>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Monto</label>
+          <input type="number" step="0.01" min="0.01" name="monto" class="form-control" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Medio</label>
+          <select name="medio_pago" class="form-select">
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+            <option value="CHEQUE">Cheque</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Motivo</label>
+          <input type="text" name="razon" class="form-control" placeholder="Opcional">
+        </div>
+        <div class="col-md-1 d-grid">
+          <button class="btn btn-warning">Adelantar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="card shadow-sm">
-    <div class="card-header">Resumen semanal y liquidacion</div>
+    <div class="card-header">Resumen mensual y liquidacion</div>
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-sm table-bordered align-middle mb-0">
@@ -492,9 +599,10 @@ include __DIR__ . '/../views/partials/navbar.php';
               <?php endforeach; ?>
               <th class="text-end">H. extra</th>
               <th class="text-end">Horas</th>
-              <th class="text-end">A liquidar</th>
               <th class="text-end">Desc. hs</th>
               <th class="text-end">Horas netas</th>
+              <th class="text-end">Adelantos</th>
+              <th class="text-end">A liquidar</th>
               <th class="text-end">Pagado</th>
               <th class="text-end">Pendiente</th>
               <th>Acciones</th>
@@ -502,13 +610,13 @@ include __DIR__ . '/../views/partials/navbar.php';
           </thead>
           <tbody>
             <?php if (!$employees): ?>
-              <tr><td colspan="17" class="text-center text-muted py-4">No hay empleados activos.</td></tr>
+              <tr><td colspan="<?= (int)$totalCols ?>" class="text-center text-muted py-4">No hay empleados activos.</td></tr>
             <?php else: ?>
               <?php foreach ($employees as $e): ?>
                 <?php
                   $eid = (int)$e['id'];
-                  $sum = $weeklySummary[$eid] ?? ['hours'=>0,'extras'=>0,'hours_discount'=>0,'hours_net'=>0,'discount_reason'=>'','rate'=>0,'gross'=>0,'paid'=>0,'pending'=>0];
-                  $disabled = ((int)$e['suspendido'] === 1 || (int)$e['en_licencia_medica'] === 1 || $sum['rate'] <= 0 || $sum['hours_net'] <= 0 || $sum['pending'] <= 0);
+                  $sum = $monthlySummary[$eid] ?? ['hours'=>0,'extras'=>0,'hours_discount'=>0,'hours_net'=>0,'discount_reason'=>'','rate'=>0,'gross'=>0,'advances'=>0,'to_pay'=>0,'paid'=>0,'pending'=>0];
+                  $disabledPay = ((int)$e['suspendido'] === 1 || (int)$e['en_licencia_medica'] === 1 || $sum['rate'] <= 0 || $sum['hours_net'] <= 0 || $sum['pending'] <= 0);
                 ?>
                 <tr>
                   <td>
@@ -540,14 +648,15 @@ include __DIR__ . '/../views/partials/navbar.php';
                   <?php endforeach; ?>
                   <td class="text-end text-primary fw-semibold"><?= e(number_format((float)$sum['extras'], 2, ',', '.')) ?></td>
                   <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours'], 2, ',', '.')) ?></td>
-                  <td class="text-end"><?= e(money($sum['gross'])) ?></td>
-                  <td class="text-end text-danger fw-semibold"><?= e(number_format((float)$sum['hours_discount'], 2, ',', '.')) ?></td>
+                  <td class="text-end text-danger fw-semibold" title="<?= e($sum['discount_reason']) ?>"><?= e(number_format((float)$sum['hours_discount'], 2, ',', '.')) ?></td>
                   <td class="text-end fw-semibold"><?= e(number_format((float)$sum['hours_net'], 2, ',', '.')) ?></td>
+                  <td class="text-end text-warning fw-semibold"><?= e(money($sum['advances'])) ?></td>
+                  <td class="text-end"><?= e(money($sum['to_pay'])) ?></td>
                   <td class="text-end"><?= e(money($sum['paid'])) ?></td>
                   <td class="text-end <?= $sum['pending'] > 0 ? 'text-danger fw-semibold' : 'text-success' ?>"><?= e(money($sum['pending'])) ?></td>
-                  <td style="min-width:240px;">
+                  <td style="min-width:270px;">
                     <form method="post" class="row g-1">
-                      <input type="hidden" name="action" value="liquidar_semana">
+                      <input type="hidden" name="action" value="liquidar_mes">
                       <input type="hidden" name="employee_id" value="<?= $eid ?>">
                       <div class="col-5">
                         <input type="date" name="fecha_pago" class="form-control form-control-sm" value="<?= e(date('Y-m-d')) ?>" required>
@@ -560,19 +669,19 @@ include __DIR__ . '/../views/partials/navbar.php';
                         </select>
                       </div>
                       <div class="col-3 d-grid">
-                        <button class="btn btn-sm btn-success" <?= $disabled ? 'disabled' : '' ?>>Pagar</button>
+                        <button class="btn btn-sm btn-success" <?= $disabledPay ? 'disabled' : '' ?>>Pagar</button>
                       </div>
                     </form>
-                    <form method="post" class="mt-1" onsubmit="return confirm('¿Resetear horas/asistencia de esta semana para este empleado?');">
-                      <input type="hidden" name="action" value="reset_week_hours">
+                    <form method="post" class="mt-1" onsubmit="return confirm('¿Resetear horas/asistencia de este mes para este empleado?');">
+                      <input type="hidden" name="action" value="reset_month_hours">
                       <input type="hidden" name="employee_id" value="<?= $eid ?>">
-                      <button class="btn btn-sm btn-outline-danger w-100" <?= ((float)$sum['hours'] <= 0) ? 'disabled' : '' ?>>Reset semana</button>
+                      <button class="btn btn-sm btn-outline-danger w-100" <?= ((float)$sum['hours'] <= 0) ? 'disabled' : '' ?>>Reset mes</button>
                     </form>
                     <form method="post" class="row g-1 mt-1">
-                      <input type="hidden" name="action" value="set_week_hours_discount">
+                      <input type="hidden" name="action" value="set_month_hours_discount">
                       <input type="hidden" name="employee_id" value="<?= $eid ?>">
                       <div class="col-4">
-                        <input type="number" step="0.25" min="0" name="hours_discount" class="form-control form-control-sm" value="<?= e(number_format((float)$sum['hours_discount'], 2, '.', '')) ?>" title="Horas a descontar en la semana">
+                        <input type="number" step="0.25" min="0" name="hours_discount" class="form-control form-control-sm" value="<?= e(number_format((float)$sum['hours_discount'], 2, '.', '')) ?>" title="Horas a descontar en el mes">
                       </div>
                       <div class="col-5">
                         <input type="text" name="discount_reason" class="form-control form-control-sm" value="<?= e($sum['discount_reason']) ?>" placeholder="Motivo">
