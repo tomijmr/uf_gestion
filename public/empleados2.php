@@ -67,10 +67,11 @@ $hasHoraEntrada = isset($attendanceCols['hora_entrada']);
 $hasHoraSalida = isset($attendanceCols['hora_salida']);
 
 $hoursByShiftSql = "((CASE WHEN ingreso_manana IS NOT NULL THEN 4 ELSE 0 END) + (CASE WHEN ingreso_tarde IS NOT NULL THEN 4 ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")";
-$hoursByClockSql = "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")";
+$hoursByClockSql = "((CASE WHEN hora_entrada IS NOT NULL AND hora_salida IS NOT NULL THEN GREATEST((TIMESTAMPDIFF(MINUTE, CONCAT(fecha,' ',hora_entrada), CONCAT(fecha,' ',hora_salida))/60) - 1,0) ELSE 0 END) + " . ($hasHorasExtras ? 'COALESCE(horas_extras,0)' : '0') . ")";
 
 if ($hasHorasTrabajadas) {
     $hoursExprSql = "(CASE
+      WHEN DAYOFWEEK(fecha)=1 THEN 0
       WHEN COALESCE(horas_trabajadas,0) > 0 THEN COALESCE(horas_trabajadas,0)
       WHEN (" . ($hasIngresoManana ? "ingreso_manana IS NOT NULL" : "0=1") . " OR " . ($hasIngresoTarde ? "ingreso_tarde IS NOT NULL" : "0=1") . ") THEN $hoursByShiftSql
       WHEN " . (($hasHoraEntrada && $hasHoraSalida) ? "(hora_entrada IS NOT NULL AND hora_salida IS NOT NULL)" : "0=1") . " THEN $hoursByClockSql
@@ -79,6 +80,7 @@ if ($hasHorasTrabajadas) {
     END)";
 } else {
     $hoursExprSql = "(CASE
+      WHEN DAYOFWEEK(fecha)=1 THEN 0
       WHEN (" . ($hasIngresoManana ? "ingreso_manana IS NOT NULL" : "0=1") . " OR " . ($hasIngresoTarde ? "ingreso_tarde IS NOT NULL" : "0=1") . ") THEN $hoursByShiftSql
       WHEN " . (($hasHoraEntrada && $hasHoraSalida) ? "(hora_entrada IS NOT NULL AND hora_salida IS NOT NULL)" : "0=1") . " THEN $hoursByClockSql
       WHEN presente=1 THEN 8

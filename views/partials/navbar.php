@@ -25,7 +25,7 @@ $MENU = [
   // Categoría: Clientes
   [
     'label' => 'Clientes',
-    'id'    => 'navClientes',
+    'id'    => 'navClientes', 
     'roles' => ['ADMIN','VENTAS','LECTURA','RRHH','DEPOSITO'],
     'items' => [
       ['label' => 'Clientes',     'href' => url('clientes.php'),     'roles' => ['ADMIN','VENTAS','LECTURA','RRHH','DEPOSITO']],
@@ -109,7 +109,7 @@ $MENU = [
                 <?= e($item['label']) ?>
               </a>
               <ul class="dropdown-menu" aria-labelledby="<?= $item['id'] ?? 'navDrop' ?>">
-                <?php foreach ($item['items'] as $sub): ?>
+                <?php foreach ($item['items'] as $sub): ?>  
                   <?php
                     $sub_allowed = in_array('*', $sub['roles'] ?? [], true) ? (bool)$user : can(...($sub['roles'] ?? []));
                     if (!$sub_allowed) continue;

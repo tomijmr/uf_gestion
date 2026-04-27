@@ -528,7 +528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $total_bruto = pedido_edit_total_bruto($P['items']);
-        $descuento = (float)$ord['descuento'];
+        $descuento = round($total_bruto * $P['descuento_pct'] / 100, 2) + $P['descuento_monto'];
         $total_neto = $total_bruto - $descuento;
         $senia = (float)$ord['senia'];
         $fin = pedido_edit_calcular_financiacion(
@@ -542,9 +542,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         pedido_edit_guardar_cuotas_financiacion($order_id, $fin, date('Y-m-d'));
 
-        db()->prepare("UPDATE orders SET total_bruto=?, total_neto=?, saldo=?, estado=?, financing_enabled=?, financing_installments=?, financing_base_amount=?, financing_surcharge_amount=?, financing_total=?, financing_installment_amount=? WHERE id=?")
+        db()->prepare("UPDATE orders SET total_bruto=?, descuento=?, total_neto=?, saldo=?, estado=?, financing_enabled=?, financing_installments=?, financing_base_amount=?, financing_surcharge_amount=?, financing_total=?, financing_installment_amount=? WHERE id=?")
           ->execute([
             $total_bruto,
+            $descuento,
             $total_neto,
             $saldo,
             $estadoFinal,
